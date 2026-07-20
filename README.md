@@ -19,11 +19,19 @@ by `scripts/build_wiki_flashcards_data.py` in the source (private) repo, which m
 hand-written Q&A pairs with concept metadata (title, definition, keywords, section,
 related concepts).
 
-## Updating content
+## Updating content (automatic)
 
-1. In the source repo, run `python scripts/build_wiki_flashcards_data.py`
-2. Copy the updated app files here and push — GitHub Pages redeploys automatically
+In the Second Brain source repo, after any `youtube-wiki/wiki/concepts/` change:
 
+```bash
+python scripts/sync_wiki_flashcards.py
+```
+
+That rebuilds `data/concepts.json` from the full wiki and pushes this repo. GitHub Pages redeploys automatically.
+
+Also wired in that repo:
+- Wiki ingest step 9 in `youtube-wiki/AGENTS.md` requires the sync after concept updates
+- Cursor hooks mark concept/Q&A edits dirty and run the sync on session stop
 ## Run locally
 
 ```bash
