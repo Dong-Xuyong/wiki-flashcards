@@ -208,7 +208,49 @@ h2.head { font-size: 0.85rem; color: var(--text-dim); text-transform: uppercase;
   margin-bottom: 8px;
   cursor: pointer;
 }
-.concept-row .t { font-size: 0.93rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.concept-row .t { font-size: 0.93rem; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.row-emoji { font-size: 1.15rem; line-height: 1; flex-shrink: 0; }
+.row-author { font-size: 0.72rem; color: var(--text-dim); margin-top: 5px; }
+.detail-emoji { margin-right: 8px; }
+.card-emoji { font-size: 2.6rem; line-height: 1; margin-bottom: 12px; text-align: center; }
+.card-emoji.small { font-size: 1.6rem; margin-bottom: 8px; text-align: left; }
+mark.hl {
+  background: rgba(119, 183, 255, 0.22);
+  color: #d8ecff;
+  font-weight: 800;
+  padding: 0 3px;
+  border-radius: 4px;
+}
+.video-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.video-list.compact { margin-top: 12px; }
+.video-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 80, 80, 0.08);
+  border: 1px solid rgba(255, 80, 80, 0.28);
+  border-radius: 12px;
+  padding: 10px 12px;
+  text-decoration: none;
+  color: var(--text);
+}
+.video-link:active { opacity: 0.85; }
+.video-yt {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #ff4444;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+.video-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.video-title { font-size: 0.82rem; font-weight: 650; line-height: 1.3; }
+.video-author { font-size: 0.7rem; color: var(--text-dim); }
 .badge {
   font-size: 0.62rem;
   font-weight: 800;

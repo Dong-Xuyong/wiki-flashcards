@@ -130,6 +130,25 @@
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
   }
+  /** Escape HTML, then turn **bold** into highlight spans. */
+  function rich(s) {
+    return esc(s).replace(/\*\*([^*]+)\*\*/g, '<mark class="hl">$1</mark>');
+  }
+  function videoLinksHtml(videos, compact) {
+    if (!videos || !videos.length) return "";
+    return `<div class="video-list ${compact ? "compact" : ""}">
+      ${videos.map((v) => {
+        const author = v.author ? `<span class="video-author">${esc(v.author)}</span>` : "";
+        return `<a class="video-link" href="${esc(v.url)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">
+          <span class="video-yt">▶</span>
+          <span class="video-meta">
+            <span class="video-title">${esc(v.title)}</span>
+            ${author}
+          </span>
+        </a>`;
+      }).join("")}
+    </div>`;
+  }
   function sectionOf(id) {
     return DATA.sections.find((s) => s.id === id) || { title: id, color: "#888" };
   }
@@ -218,7 +237,8 @@
     if (libFilter === "new" && !isNew(c.slug)) return false;
     if (libSearch) {
       const q = libSearch.toLowerCase();
-      const hay = `${c.title} ${c.slug} ${c.keywords.join(" ")}`.toLowerCase();
+      const authors = (c.videos || []).map((v) => `${v.author || ""} ${v.title || ""}`).join(" ");
+      const hay = `${c.title} ${c.slug} ${c.keywords.join(" ")} ${authors}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -230,9 +250,16 @@
     else if (isUnknown(c.slug)) badge = `<span class="badge unknown">Unknown</span>`;
     else if (isDue(c.slug)) badge = `<span class="badge due">Due</span>`;
     const kws = c.keywords.slice(0, 4).map((k) => `<span class="kw">${esc(k)}</span>`).join("");
+    const emoji = c.e ? `<span class="row-emoji">${esc(c.e)}</span>` : "";
+    const authors = (c.videos || []).map((v) => v.author).filter(Boolean);
+    const uniqAuthors = [...new Set(authors)].slice(0, 2);
+    const authorLine = uniqAuthors.length
+      ? `<div class="row-author">${esc(uniqAuthors.join(" · "))}</div>`
+      : "";
     return `
       <div class="concept-row" data-slug="${c.slug}">
-        <div class="t">${esc(c.title)}${badge}</div>
+        <div class="t">${emoji}<span>${esc(c.title)}</span>${badge}</div>
+        ${authorLine}
         ${kws ? `<div class="kw-row">${kws}</div>` : ""}
       </div>`;
   }
@@ -287,16 +314,18 @@
     const sec = sectionOf(c.section);
     setChrome(sec.title, "", true);
     const known = isKnown(slug);
+    const emoji = c.e ? `<span class="detail-emoji">${esc(c.e)}</span>` : "";
     root.innerHTML = `
-      <div class="detail-title">${esc(c.title)}
+      <div class="detail-title">${emoji}${esc(c.title)}
         ${known ? '<span class="badge known">Known</span>' : isUnknown(slug) ? '<span class="badge unknown">Unknown</span>' : ""}
       </div>
       ${c.keywords.length ? `<div class="kw-row">${c.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}
       <div class="panel qa-block">
-        <div class="q">Q: ${esc(c.q)}</div>
-        <div class="a">A: ${esc(c.a)}</div>
+        <div class="q">Q: ${rich(c.q)}</div>
+        <div class="a">A: ${rich(c.a)}</div>
       </div>
       ${c.definition ? `<div class="detail-def">${esc(c.definition)}</div>` : ""}
+      ${(c.videos && c.videos.length) ? `<h2 class="head">Videos</h2>${videoLinksHtml(c.videos, false)}` : ""}
       <button class="toggle-known-btn ${known ? "is-known" : ""}" id="toggle-known">
         ${known ? "&#10003; Marked as known — tap to unmark" : "Mark as known"}
       </button>
@@ -337,7 +366,8 @@
           <div id="study-progress">${session.done + 1} / ${session.total}</div>
           <div class="flashcard" id="card">
             <div class="side-label" style="color:${sec.color}">Question &middot; ${esc(sec.title)}</div>
-            <div class="q-text">${esc(c.q)}</div>
+            ${c.e ? `<div class="card-emoji">${esc(c.e)}</div>` : ""}
+            <div class="q-text">${rich(c.q)}</div>
             ${session.hint
               ? `<div class="kw-row" style="margin-top:14px">${c.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>`
               : `<button class="hint-btn" id="hint-btn">Show keywords hint</button>`}
@@ -345,7 +375,7 @@
           </div>
         </div>`;
       root.querySelector("#card").onclick = (e) => {
-        if (e.target.id === "hint-btn") return;
+        if (e.target.id === "hint-btn" || e.target.closest("a")) return;
         session.flipped = true;
         render();
       };
@@ -357,9 +387,11 @@
           <div id="study-progress">${session.done + 1} / ${session.total}</div>
           <div class="flashcard">
             <div class="side-label" style="color:${sec.color}">Answer</div>
-            <div class="a-text">${esc(c.a)}</div>
+            ${c.e ? `<div class="card-emoji small">${esc(c.e)}</div>` : ""}
+            <div class="a-text">${rich(c.a)}</div>
             <div class="concept-name">${esc(c.title)}</div>
             ${c.keywords.length ? `<div class="kw-row" style="margin-top:10px">${c.keywords.slice(0, 5).map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}
+            ${videoLinksHtml(c.videos, true)}
           </div>
           <div class="known-row">
             <button class="known-btn mark-unknown" id="btn-unknown">&#10007; Don't know it</button>
@@ -377,7 +409,6 @@
           const g = Number(b.dataset.g);
           grade(slug, g);
           if (g === 0) {
-            // reinsert a few cards later in this session
             const pos = Math.min(session.queue.length, session.idx + 4);
             session.queue.splice(pos, 0, slug);
             session.total += 1;
