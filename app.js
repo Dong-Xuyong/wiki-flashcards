@@ -323,6 +323,7 @@
       <div class="panel qa-block">
         <div class="q">Q: ${rich(c.q)}</div>
         <div class="a">A: ${rich(c.a)}</div>
+        ${c.x ? `<div class="x">Example: ${rich(c.x)}</div>` : ""}
       </div>
       ${c.definition ? `<div class="detail-def">${esc(c.definition)}</div>` : ""}
       ${(c.videos && c.videos.length) ? `<h2 class="head">Videos</h2>${videoLinksHtml(c.videos, false)}` : ""}
@@ -389,6 +390,7 @@
             <div class="side-label" style="color:${sec.color}">Answer</div>
             ${c.e ? `<div class="card-emoji small">${esc(c.e)}</div>` : ""}
             <div class="a-text">${rich(c.a)}</div>
+            ${c.x ? `<div class="x-text"><span class="x-label">Example</span>${rich(c.x)}</div>` : ""}
             <div class="concept-name">${esc(c.title)}</div>
             ${c.keywords.length ? `<div class="kw-row" style="margin-top:10px">${c.keywords.slice(0, 5).map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}
             ${videoLinksHtml(c.videos, true)}
