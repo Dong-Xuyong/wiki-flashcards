@@ -75,7 +75,7 @@ html.dark {
   --secondary: 0 0% 17%;
   --secondary-foreground: 40 8% 93%;
   --muted: 0 0% 17%;
-  --muted-foreground: 0 0% 60%;
+  --muted-foreground: 0 0% 72%;
   --accent: 0 0% 17%;
   --accent-foreground: 40 8% 93%;
   --destructive: 0 62.8% 30.6%;
@@ -89,7 +89,7 @@ html.dark {
   --card-hex: #1f1f1f;
   --primary-hex: #3b82f6;
   --muted-hex: #2b2b2b;
-  --muted-fg-hex: #999999;
+  --muted-fg-hex: #b8b8b8;
   --border-hex: #2b2b2b;
   --theme-color: #141414;
 

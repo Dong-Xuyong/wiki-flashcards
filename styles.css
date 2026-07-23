@@ -15,11 +15,11 @@
 
   /* Text */
   --text: #0d0b08;
-  --text-dim: #76726b;
-  --text-mute: #76726b;
+  --text-dim: #3f3b36;
+  --text-mute: #5c574f;
 
-  /* Accent — mint cyan (app brand, not dong primary) */
-  --accent: #3ecfbf;
+  /* Accent — mint deepened for light backgrounds */
+  --accent: #0f766e;
   --accent-soft: rgba(62, 207, 191, 0.14);
   --accent-border: rgba(62, 207, 191, 0.35);
   --accent-ink: #06221f;
@@ -60,8 +60,11 @@ html.dark {
   --border: #2b2b2b;
   --border-soft: rgba(239, 238, 236, 0.12);
   --text: #efeeec;
-  --text-dim: #999999;
-  --text-mute: #999999;
+  --text-dim: #d0cec9;
+  --text-mute: #b0aea8;
+  --accent: #3ecfbf;
+  --accent-soft: rgba(62, 207, 191, 0.14);
+  --accent-border: rgba(62, 207, 191, 0.35);
   --shadow-card: 0 8px 28px rgba(0, 0, 0, 0.28);
 }
 
