@@ -6,11 +6,12 @@ Live: https://dong-xuyong.github.io/wiki-flashcards/
 
 ## Features
 
-- **Library** — all 1,184 concepts grouped by theme, each with keywords; search and filter by Known / Unknown / Due / New
+- **Library** — all concepts grouped by theme, each with keywords; search and filter by Known / Unknown / Due / New
 - **Study** — question & answer flashcards with an optional keywords hint
 - **Spaced repetition** — grade cards Again / Hard / Good / Easy (SM-2-lite scheduling); due cards resurface automatically
 - **Known / unknown tracking** — mark cards you already know to remove them from study, or flag ones you don't to prioritize them
-- Progress, streak, and card state live in `localStorage` on the device
+- **Analytics** — progress timeline with 30-day review chart, activity heatmap, KPIs, and per-section mastery
+- Progress, streak, card state, and analytics events live in `localStorage` on the device
 
 ## Stack
 

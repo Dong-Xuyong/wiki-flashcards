@@ -49,12 +49,14 @@
     const c = card(slug);
     c.st = "known";
     save();
+    window.WikiAnalytics?.record({ type: "known", slug });
   }
   function markUnknown(slug) {
     const c = card(slug);
     c.st = "unknown";
     c.due = Date.now();
     save();
+    window.WikiAnalytics?.record({ type: "unknown", slug });
   }
   function clearMark(slug) {
     card(slug).st = null;
@@ -86,6 +88,7 @@
     }
     bumpStreak();
     save();
+    window.WikiAnalytics?.record({ type: "review", slug, grade: g });
   }
 
   function bumpStreak() {
@@ -172,6 +175,25 @@
     if (currentTab === "home") return renderHome();
     if (currentTab === "library") return renderLibrary();
     if (currentTab === "study") return renderStudy();
+    if (currentTab === "analytics") return renderAnalytics();
+  }
+
+  function renderAnalytics() {
+    setChrome("Analytics", "your progress", false);
+    root.innerHTML = `<div id="analytics-root"></div>`;
+    const el = root.querySelector("#analytics-root");
+    if (window.WikiAnalytics && typeof WikiAnalytics.render === "function") {
+      WikiAnalytics.render(el, {
+        esc,
+        stats,
+        store,
+        DATA,
+        sectionOf,
+        isKnown,
+      });
+    } else {
+      el.innerHTML = `<div class="timeline-empty">Analytics module loading…</div>`;
+    }
   }
 
   // ----- home -----
@@ -185,7 +207,7 @@
         <div class="stat streak"><div class="num">${store.streak.count || 0}</div><div class="lbl">Day streak</div></div>
       </div>
       <button class="big-btn" id="study-all" ${st.due + st.fresh === 0 ? "disabled" : ""}>
-        Study now${st.due ? ` (${st.due} due)` : ""}
+        ${st.due > 0 ? `Study now — ${st.due} due` : "Study now"}
       </button>
       <h2 class="head">Sections</h2>`;
     for (const s of DATA.sections) {
@@ -351,6 +373,7 @@
     currentTab = "study";
     detailStack = [];
     tabs.forEach((b) => b.classList.toggle("active", b.dataset.tab === "study"));
+    window.WikiAnalytics?.record({ type: "session_start", sectionId });
     render();
   }
 
@@ -364,7 +387,7 @@
     if (!session.flipped) {
       root.innerHTML = `
         <div id="study-wrap">
-          <div id="study-progress">${session.done + 1} / ${session.total}</div>
+          <div id="study-progress">${session.done + 1} / ${session.total}${session.total ? ` · ${Math.round(((session.done + 1) / session.total) * 100)}%` : ""}</div>
           <div class="flashcard" id="card">
             <div class="side-label" style="color:${sec.color}">Question &middot; ${esc(sec.title)}</div>
             ${c.e ? `<div class="card-emoji">${esc(c.e)}</div>` : ""}
@@ -385,7 +408,7 @@
     } else {
       root.innerHTML = `
         <div id="study-wrap">
-          <div id="study-progress">${session.done + 1} / ${session.total}</div>
+          <div id="study-progress">${session.done + 1} / ${session.total}${session.total ? ` · ${Math.round(((session.done + 1) / session.total) * 100)}%` : ""}</div>
           <div class="flashcard">
             <div class="side-label" style="color:${sec.color}">Answer</div>
             ${c.e ? `<div class="card-emoji small">${esc(c.e)}</div>` : ""}
@@ -454,6 +477,11 @@
     const st = stats(null);
     setChrome("Study", "", false);
     if (finished) {
+      window.WikiAnalytics?.record({
+        type: "session_end",
+        cards: session.done,
+        sectionId: session.sectionId,
+      });
       root.innerHTML = `
         <div class="done-panel">
           <div class="emoji">&#127881;</div>
