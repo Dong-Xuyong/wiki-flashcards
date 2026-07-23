@@ -24,14 +24,15 @@
   --accent-border: rgba(62, 207, 191, 0.35);
   --accent-ink: #06221f;
 
-  /* Semantic */
-  --green: #4ade80;
-  --green-soft: rgba(74, 222, 128, 0.14);
-  --red: #f07178;
-  --red-soft: rgba(240, 113, 120, 0.14);
-  --amber: #e8b84a;
-  --amber-soft: rgba(232, 184, 74, 0.14);
-  --yt: #ff4444;
+  /* Semantic — deepened for light backgrounds */
+  --green: #15803d;
+  --green-soft: rgba(21, 128, 61, 0.14);
+  --red: #b42318;
+  --red-soft: rgba(180, 35, 24, 0.14);
+  --amber: #9a6b00;
+  --amber-soft: rgba(154, 107, 0, 0.14);
+  --yt: #c62828;
+  --hl-ink: #06221f;
 
   /* Type — Encode Sans via dong-ui --font-sans */
   --font-ui: var(--font-sans);
@@ -65,6 +66,14 @@ html.dark {
   --accent: #3ecfbf;
   --accent-soft: rgba(62, 207, 191, 0.14);
   --accent-border: rgba(62, 207, 191, 0.35);
+  --green: #4ade80;
+  --green-soft: rgba(74, 222, 128, 0.14);
+  --red: #f07178;
+  --red-soft: rgba(240, 113, 120, 0.14);
+  --amber: #e8b84a;
+  --amber-soft: rgba(232, 184, 74, 0.14);
+  --yt: #ff4444;
+  --hl-ink: #c8fff6;
   --shadow-card: 0 8px 28px rgba(0, 0, 0, 0.28);
 }
 
@@ -466,7 +475,7 @@ h2.head {
 
 mark.hl {
   background: var(--accent-soft);
-  color: #c8fff6;
+  color: var(--hl-ink);
   font-weight: 750;
   padding: 0 3px;
   border-radius: 4px;

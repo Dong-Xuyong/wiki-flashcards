@@ -15,7 +15,7 @@
   --secondary: 44 15% 91%;
   --secondary-foreground: 36 15% 18%;
   --muted: 44 15% 91%;
-  --muted-foreground: 40 5% 44%;
+  --muted-foreground: 40 8% 36%;
   --accent: 44 15% 91%;
   --accent-foreground: 36 15% 18%;
   --destructive: 0 84.2% 60.2%;
@@ -30,7 +30,7 @@
   --card-hex: #ffffff;
   --primary-hex: #2563eb;
   --muted-hex: #ebeae5;
-  --muted-fg-hex: #76726b;
+  --muted-fg-hex: #5c574f;
   --border-hex: #e2e0d9;
   --theme-color: #f6f4ef;
 
