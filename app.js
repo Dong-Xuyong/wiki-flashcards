@@ -674,6 +674,9 @@
     if (pendingDepth !== null) {
       history.replaceState({ d: pendingDepth }, "");
       pendingDepth = null;
+    } else if (!history.state) {
+      // Hash changed from outside the app (pasted link, external anchor).
+      history.replaceState({ d: 0 }, "");
     }
     if (DATA) render();
   });
