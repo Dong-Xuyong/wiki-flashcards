@@ -14,7 +14,7 @@
   let DATA = null; // { sections, videos, concepts }
   let bySlug = {};
   let store = load();
-  let internalNav = 0; // hash pushes we made ourselves, so back can pop safely
+  let pendingDepth = null; // history depth to stamp on the entry go() is creating
   let session = null; // { queue: [slug], idx, flipped, total, sectionId, videoSlug }
 
   const root = document.getElementById("view-root");
@@ -226,23 +226,24 @@
     return { name: "home" };
   }
 
+  /** How many in-app hops led to the current history entry. */
+  function depth() {
+    return (history.state && history.state.d) || 0;
+  }
+
   function go(hash) {
     if (location.hash === hash || (hash === "#/" && !location.hash)) {
       render();
       return;
     }
-    internalNav += 1;
+    pendingDepth = depth() + 1;
     location.hash = hash;
   }
 
   function goBack() {
-    if (internalNav > 0) {
-      internalNav -= 1;
-      history.back();
-      return;
-    }
-    // Deep link straight into a detail view — no history to pop.
-    location.hash = "#/library";
+    // Depth lives on the history entry, so browser back/forward can't desync it.
+    if (depth() > 0) history.back();
+    else location.hash = "#/library"; // deep link straight in — nothing to pop
   }
 
   function render() {
@@ -669,7 +670,14 @@
     if (b.dataset.tab !== "study") session = null;
     go(TAB_ROUTES[b.dataset.tab]);
   }));
-  window.addEventListener("hashchange", () => { if (DATA) render(); });
+  window.addEventListener("hashchange", () => {
+    if (pendingDepth !== null) {
+      history.replaceState({ d: pendingDepth }, "");
+      pendingDepth = null;
+    }
+    if (DATA) render();
+  });
+  if (!history.state) history.replaceState({ d: 0 }, "");
 
   fetch("data/concepts.json")
     .then((r) => {
