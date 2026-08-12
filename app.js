@@ -6,12 +6,16 @@
   const DAY = 24 * 60 * 60 * 1000;
   const NEW_PER_SESSION = 20;
 
-  let DATA = null; // { sections, concepts }
+  // Sibling app; relative when serving the repo root locally.
+  const INSIGHTS_URL = /^(localhost|127\.0\.0\.1)$/.test(location.hostname)
+    ? "../wiki-insights/"
+    : "https://dong-xuyong.github.io/wiki-insights/";
+
+  let DATA = null; // { sections, videos, concepts }
   let bySlug = {};
   let store = load();
-  let currentTab = "home";
-  let detailStack = []; // slugs for detail navigation
-  let session = null; // { queue: [slug], idx, flipped, total, sectionId }
+  let internalNav = 0; // hash pushes we made ourselves, so back can pop safely
+  let session = null; // { queue: [slug], idx, flipped, total, sectionId, videoSlug }
 
   const root = document.getElementById("view-root");
   const topTitle = document.getElementById("topbar-title");
@@ -101,13 +105,30 @@
   }
 
   // ---------- queue building ----------
-  function buildQueue(sectionId) {
-    const pool = DATA.concepts.filter((c) => !sectionId || c.section === sectionId);
+  /** Concepts matching a scope: whole deck, one section, or one source video. */
+  function poolFor(opts) {
+    const { sectionId, videoSlug } = opts || {};
+    return DATA.concepts.filter(
+      (c) =>
+        (!sectionId || c.section === sectionId) &&
+        (!videoSlug || (c.videos || []).includes(videoSlug))
+    );
+  }
+
+  function buildQueue(opts) {
+    const pool = poolFor(opts);
+    if (opts && opts.all) {
+      const every = pool.map((c) => c.slug);
+      shuffle(every);
+      return every;
+    }
     const due = pool.filter((c) => isDue(c.slug)).map((c) => c.slug);
     const fresh = pool.filter((c) => isNew(c.slug)).map((c) => c.slug);
     shuffle(due);
     shuffle(fresh);
-    return due.concat(fresh.slice(0, NEW_PER_SESSION));
+    // A video session is a finite, named set — study all of it, not a slice.
+    const take = opts && opts.videoSlug ? fresh.length : NEW_PER_SESSION;
+    return due.concat(fresh.slice(0, take));
   }
   function shuffle(a) {
     for (let i = a.length - 1; i > 0; i--) {
@@ -117,8 +138,8 @@
   }
 
   // ---------- stats ----------
-  function stats(sectionId) {
-    const pool = DATA.concepts.filter((c) => !sectionId || c.section === sectionId);
+  function stats(scope) {
+    const pool = poolFor(typeof scope === "string" || !scope ? { sectionId: scope } : scope);
     let due = 0, known = 0, unknown = 0, fresh = 0;
     for (const c of pool) {
       if (isKnown(c.slug)) known++;
@@ -137,18 +158,44 @@
   function rich(s) {
     return esc(s).replace(/\*\*([^*]+)\*\*/g, '<mark class="hl">$1</mark>');
   }
-  function videoLinksHtml(videos, compact) {
-    if (!videos || !videos.length) return "";
+  function videoOf(slug) {
+    return (DATA.videos && DATA.videos[slug]) || null;
+  }
+  function thumbUrl(v) {
+    return v && v.id ? `https://i.ytimg.com/vi/${encodeURIComponent(v.id)}/mqdefault.jpg` : "";
+  }
+  function insightsUrl(slug) {
+    return `${INSIGHTS_URL}#/v/${encodeURIComponent(slug)}`;
+  }
+  function videoSubtitle(v) {
+    return [v.author, v.min ? `${v.min} min` : "", v.n ? `${v.n} concepts` : ""].filter(Boolean).join(" · ");
+  }
+
+  /** Source videos behind a concept. Compact drops thumbnails to keep study cards tight. */
+  function videoRowsHtml(slugs, compact) {
+    const list = (slugs || []).filter(videoOf);
+    if (!list.length) return "";
     return `<div class="video-list ${compact ? "compact" : ""}">
-      ${videos.map((v) => {
-        const author = v.author ? `<span class="video-author">${esc(v.author)}</span>` : "";
-        return `<a class="video-link" href="${esc(v.url)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">
-          <span class="video-yt">▶</span>
+      ${list.map((slug) => {
+        const v = videoOf(slug);
+        const thumb = !compact && thumbUrl(v)
+          ? `<img class="video-thumb" src="${esc(thumbUrl(v))}" alt="" loading="lazy" decoding="async" />`
+          : `<span class="video-yt">▶</span>`;
+        const sub = videoSubtitle(v);
+        const insights = v.insights
+          ? `<a class="video-act primary" href="${esc(insightsUrl(slug))}" onclick="event.stopPropagation()">Insights</a>`
+          : "";
+        return `<div class="video-row" onclick="event.stopPropagation()">
+          ${thumb}
           <span class="video-meta">
             <span class="video-title">${esc(v.title)}</span>
-            ${author}
+            ${sub ? `<span class="video-author">${esc(sub)}</span>` : ""}
           </span>
-        </a>`;
+          <span class="video-actions">
+            ${insights}
+            <a class="video-act" href="${esc(v.url)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">YouTube</a>
+          </span>
+        </div>`;
       }).join("")}
     </div>`;
   }
@@ -162,20 +209,51 @@
     backBtn.classList.toggle("hidden", !showBack);
   }
 
-  function switchTab(tab) {
-    currentTab = tab;
-    detailStack = [];
-    if (tab !== "study") session = null;
-    tabs.forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-    render();
+  // ---------- routing ----------
+  const TAB_ROUTES = { home: "#/", library: "#/library", study: "#/study", analytics: "#/analytics" };
+  // Detail views live under the Library tab.
+  const TAB_FOR = { home: "home", library: "library", study: "study", analytics: "analytics", concept: "library", video: "library" };
+
+  function parseRoute() {
+    const h = (location.hash || "#/").replace(/^#/, "");
+    let m = h.match(/^\/c\/([^/?#]+)/);
+    if (m) return { name: "concept", slug: decodeURIComponent(m[1]) };
+    m = h.match(/^\/v\/([^/?#]+)/);
+    if (m) return { name: "video", slug: decodeURIComponent(m[1]) };
+    if (h.startsWith("/library")) return { name: "library" };
+    if (h.startsWith("/study")) return { name: "study" };
+    if (h.startsWith("/analytics")) return { name: "analytics" };
+    return { name: "home" };
+  }
+
+  function go(hash) {
+    if (location.hash === hash || (hash === "#/" && !location.hash)) {
+      render();
+      return;
+    }
+    internalNav += 1;
+    location.hash = hash;
+  }
+
+  function goBack() {
+    if (internalNav > 0) {
+      internalNav -= 1;
+      history.back();
+      return;
+    }
+    // Deep link straight into a detail view — no history to pop.
+    location.hash = "#/library";
   }
 
   function render() {
-    if (detailStack.length) return renderDetail(detailStack[detailStack.length - 1]);
-    if (currentTab === "home") return renderHome();
-    if (currentTab === "library") return renderLibrary();
-    if (currentTab === "study") return renderStudy();
-    if (currentTab === "analytics") return renderAnalytics();
+    const r = parseRoute();
+    tabs.forEach((b) => b.classList.toggle("active", b.dataset.tab === TAB_FOR[r.name]));
+    if (r.name === "concept") return renderDetail(r.slug);
+    if (r.name === "video") return renderVideo(r.slug);
+    if (r.name === "library") return renderLibrary();
+    if (r.name === "study") return renderStudy();
+    if (r.name === "analytics") return renderAnalytics();
+    return renderHome();
   }
 
   function renderAnalytics() {
@@ -259,8 +337,10 @@
     if (libFilter === "new" && !isNew(c.slug)) return false;
     if (libSearch) {
       const q = libSearch.toLowerCase();
-      const authors = (c.videos || []).map((v) => `${v.author || ""} ${v.title || ""}`).join(" ");
-      const hay = `${c.title} ${c.slug} ${c.keywords.join(" ")} ${authors}`.toLowerCase();
+      const sources = (c.videos || [])
+        .map((s) => { const v = videoOf(s); return v ? `${v.author || ""} ${v.title || ""}` : ""; })
+        .join(" ");
+      const hay = `${c.title} ${c.slug} ${c.keywords.join(" ")} ${sources}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -273,7 +353,7 @@
     else if (isDue(c.slug)) badge = `<span class="badge due">Due</span>`;
     const kws = c.keywords.slice(0, 4).map((k) => `<span class="kw">${esc(k)}</span>`).join("");
     const emoji = c.e ? `<span class="row-emoji">${esc(c.e)}</span>` : "";
-    const authors = (c.videos || []).map((v) => v.author).filter(Boolean);
+    const authors = (c.videos || []).map((s) => (videoOf(s) || {}).author).filter(Boolean);
     const uniqAuthors = [...new Set(authors)].slice(0, 2);
     const authorLine = uniqAuthors.length
       ? `<div class="row-author">${esc(uniqAuthors.join(" · "))}</div>`
@@ -324,15 +404,19 @@
         renderLibList();
       };
     });
-    list.querySelectorAll(".concept-row").forEach((r) => {
-      r.onclick = () => { detailStack.push(r.dataset.slug); render(); };
+    bindConceptRows(list);
+  }
+
+  function bindConceptRows(scope) {
+    scope.querySelectorAll(".concept-row").forEach((r) => {
+      r.onclick = () => go(`#/c/${encodeURIComponent(r.dataset.slug)}`);
     });
   }
 
   // ----- detail -----
   function renderDetail(slug) {
     const c = bySlug[slug];
-    if (!c) { detailStack.pop(); return render(); }
+    if (!c) return renderMissing("Concept not found.");
     const sec = sectionOf(c.section);
     setChrome(sec.title, "", true);
     const known = isKnown(slug);
@@ -348,7 +432,7 @@
         ${c.x ? `<div class="x">Example: ${rich(c.x)}</div>` : ""}
       </div>
       ${c.definition ? `<div class="detail-def">${esc(c.definition)}</div>` : ""}
-      ${(c.videos && c.videos.length) ? `<h2 class="head">Videos</h2>${videoLinksHtml(c.videos, false)}` : ""}
+      ${(c.videos && c.videos.length) ? `<h2 class="head">From these videos</h2>${videoRowsHtml(c.videos, false)}` : ""}
       <button class="toggle-known-btn ${known ? "is-known" : ""}" id="toggle-known">
         ${known ? "&#10003; Marked as known — tap to unmark" : "Mark as known"}
       </button>
@@ -361,20 +445,78 @@
       render();
     };
     root.querySelectorAll(".related-link").forEach((b) => {
-      b.onclick = () => { detailStack.push(b.dataset.slug); render(); };
+      b.onclick = () => go(`#/c/${encodeURIComponent(b.dataset.slug)}`);
     });
     root.scrollTop = 0;
   }
 
+  function renderMissing(msg) {
+    setChrome("Not found", "", true);
+    root.innerHTML = `<div class="empty-note">${esc(msg)}</div>
+      <button class="big-btn secondary" id="to-library">Browse the library</button>`;
+    root.querySelector("#to-library").onclick = () => go("#/library");
+  }
+
+  // ----- one video's concepts (landing target from Wiki Insights) -----
+  function renderVideo(slug) {
+    const v = videoOf(slug);
+    if (!v) return renderMissing("That video is not in this deck yet.");
+    const members = poolFor({ videoSlug: slug });
+    const st = stats({ videoSlug: slug });
+    const queued = st.due + st.fresh;
+    const thumb = thumbUrl(v);
+    setChrome("From this video", `${members.length} concepts`, true);
+    root.innerHTML = `
+      <div class="vid-hero">
+        ${thumb ? `<img class="vid-hero-thumb" src="${esc(thumb)}" alt="" loading="lazy" decoding="async" />` : ""}
+        <div class="vid-hero-title">${esc(v.title)}</div>
+        ${videoSubtitle(v) ? `<div class="vid-hero-meta">${esc(videoSubtitle(v))}</div>` : ""}
+        <div class="vid-hero-actions">
+          ${v.insights ? `<a class="vid-act primary" href="${esc(insightsUrl(slug))}">Open insights</a>` : ""}
+          <a class="vid-act" href="${esc(v.url)}" target="_blank" rel="noopener noreferrer">Watch on YouTube</a>
+        </div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat due"><div class="num">${st.due}</div><div class="lbl">Due now</div></div>
+        <div class="stat known"><div class="num">${st.known}</div><div class="lbl">Known</div></div>
+        <div class="stat streak"><div class="num">${st.fresh}</div><div class="lbl">New</div></div>
+      </div>
+      <button class="big-btn" id="study-video" ${members.length ? "" : "disabled"}>
+        ${queued ? `Study ${queued} concept${queued === 1 ? "" : "s"}` : `Review all ${members.length}`}
+      </button>
+      <h2 class="head">Concepts from this video</h2>
+      <div id="vid-list">${members.map(conceptRow).join("") || `<div class="empty-note">No concepts linked yet.</div>`}</div>`;
+    root.querySelector("#study-video").onclick = () =>
+      startSession({ videoSlug: slug, all: queued === 0 });
+    bindConceptRows(root.querySelector("#vid-list"));
+    root.scrollTop = 0;
+  }
+
   // ----- study -----
-  function startSession(sectionId) {
-    const queue = buildQueue(sectionId);
-    session = { queue, idx: 0, flipped: false, hint: false, total: queue.length, sectionId, done: 0 };
-    currentTab = "study";
-    detailStack = [];
-    tabs.forEach((b) => b.classList.toggle("active", b.dataset.tab === "study"));
-    window.WikiAnalytics?.record({ type: "session_start", sectionId });
-    render();
+  function startSession(opts) {
+    const scope = typeof opts === "string" || !opts ? { sectionId: opts || null } : opts;
+    const queue = buildQueue(scope);
+    session = {
+      queue,
+      idx: 0,
+      flipped: false,
+      hint: false,
+      total: queue.length,
+      sectionId: scope.sectionId || null,
+      videoSlug: scope.videoSlug || null,
+      done: 0,
+    };
+    window.WikiAnalytics?.record({ type: "session_start", sectionId: session.sectionId });
+    go("#/study");
+  }
+
+  function studyScopeTitle() {
+    if (!session) return "Study";
+    if (session.videoSlug) {
+      const v = videoOf(session.videoSlug);
+      return v ? v.title : "Study";
+    }
+    return session.sectionId ? sectionOf(session.sectionId).title : "Study";
   }
 
   function renderStudy() {
@@ -382,7 +524,7 @@
     const slug = session.queue[session.idx];
     const c = bySlug[slug];
     const sec = sectionOf(c.section);
-    setChrome(session.sectionId ? sec.title : "Study", `streak ${store.streak.count || 0}`, false);
+    setChrome(studyScopeTitle(), `streak ${store.streak.count || 0}`, false);
 
     if (!session.flipped) {
       root.innerHTML = `
@@ -416,7 +558,7 @@
             ${c.x ? `<div class="x-text"><span class="x-label">Example</span>${rich(c.x)}</div>` : ""}
             <div class="concept-name">${esc(c.title)}</div>
             ${c.keywords.length ? `<div class="kw-row" style="margin-top:10px">${c.keywords.slice(0, 5).map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}
-            ${videoLinksHtml(c.videos, true)}
+            ${videoRowsHtml((c.videos || []).slice(0, 2), true)}
           </div>
           <div class="known-row">
             <button class="known-btn mark-unknown" id="btn-unknown">&#10007; Don't know it</button>
