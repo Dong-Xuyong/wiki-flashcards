@@ -624,16 +624,20 @@
         cards: session.done,
         sectionId: session.sectionId,
       });
+      const fromVideo = session.videoSlug;
       root.innerHTML = `
         <div class="done-panel">
           <div class="emoji">&#127881;</div>
           <h3>Session complete</h3>
           <p>${session.done} cards reviewed. ${st.due} still due today.</p>
           <button class="big-btn" id="again-btn" ${st.due + st.fresh === 0 ? "disabled" : ""}>Study more</button>
+          ${fromVideo ? `<button class="big-btn secondary" id="video-btn">Back to the video</button>` : ""}
           <button class="big-btn secondary" id="home-btn">Back to home</button>
         </div>`;
       root.querySelector("#again-btn").onclick = () => startSession(null);
-      root.querySelector("#home-btn").onclick = () => switchTab("home");
+      const videoBtn = root.querySelector("#video-btn");
+      if (videoBtn) videoBtn.onclick = () => go(`#/v/${encodeURIComponent(fromVideo)}`);
+      root.querySelector("#home-btn").onclick = () => go("#/");
       session = null;
       return;
     }
@@ -660,8 +664,12 @@
   }
 
   // ---------- boot ----------
-  backBtn.onclick = () => { detailStack.pop(); render(); };
-  tabs.forEach((b) => (b.onclick = () => switchTab(b.dataset.tab)));
+  backBtn.onclick = goBack;
+  tabs.forEach((b) => (b.onclick = () => {
+    if (b.dataset.tab !== "study") session = null;
+    go(TAB_ROUTES[b.dataset.tab]);
+  }));
+  window.addEventListener("hashchange", () => { if (DATA) render(); });
 
   fetch("data/concepts.json")
     .then((r) => {
@@ -670,6 +678,7 @@
     })
     .then((data) => {
       DATA = data;
+      DATA.videos = DATA.videos || {};
       for (const c of data.concepts) bySlug[c.slug] = c;
       render();
     })
