@@ -275,33 +275,67 @@
     }
   }
 
+  function completionBar(pct, label) {
+    return `
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+        aria-valuenow="${pct}" aria-label="${esc(label)}">
+        <span class="progress-fill" style="width:${pct}%"></span>
+      </div>`;
+  }
+
+  function sectionRowHtml(s, ss, mode) {
+    const pct = ss.total ? Math.round((ss.known / ss.total) * 100) : 0;
+    const counts = mode === "study"
+      ? `${ss.due} due · ${ss.fresh} new`
+      : `${ss.known}/${ss.total} known${ss.due ? ` · ${ss.due} due` : ""}`;
+    return `
+      <div class="section-row" data-section="${s.id}">
+        <span class="section-dot" style="background:${s.color}"></span>
+        <span class="section-row-main">
+          <span class="name">${esc(s.title)}</span>
+          <span class="counts">${counts}</span>
+          ${completionBar(pct, `${s.title}: ${pct}% known`)}
+        </span>
+        <span class="section-chevron" aria-hidden="true">›</span>
+      </div>`;
+  }
+
   // ----- home -----
   function renderHome() {
     const st = stats(null);
+    const pct = st.total ? Math.round((st.known / st.total) * 100) : 0;
+    const queued = st.due + st.fresh;
     setChrome("Wiki Flashcards", `${st.total} concepts`, false);
     let html = `
-      <div class="stat-grid">
-        <div class="stat due"><div class="num">${st.due}</div><div class="lbl">Due now</div></div>
-        <div class="stat known"><div class="num">${st.known}</div><div class="lbl">Known</div></div>
-        <div class="stat streak"><div class="num">${store.streak.count || 0}</div><div class="lbl">Day streak</div></div>
-      </div>
-      <button class="big-btn" id="study-all" ${st.due + st.fresh === 0 ? "disabled" : ""}>
-        ${st.due > 0 ? `Study now — ${st.due} due` : "Study now"}
+      <section class="learning-hero" aria-labelledby="learning-title">
+        <div class="hero-topline">
+          <span class="eyebrow">Your library</span>
+          <span class="hero-xp">${st.total} cards</span>
+        </div>
+        <h2 id="learning-title">${pct}% of your library completed</h2>
+        ${completionBar(pct, `${pct}% of library completed`)}
+        <div class="status-stats">
+          <div><strong>${st.due}</strong><span>Due</span></div>
+          <div><strong>${st.known}</strong><span>Known</span></div>
+          <div><strong>${store.streak.count || 0}</strong><span>Streak</span></div>
+        </div>
+      </section>
+      <button type="button" class="primary-action" id="study-all" ${queued === 0 ? "disabled" : ""}>
+        <span>
+          <small>${st.due > 0 ? `Study now — ${st.due} due` : queued ? "Study now" : "You're caught up"}</small>
+          <strong>${queued ? "Study due + new cards" : "No cards waiting"}</strong>
+        </span>
+        <span class="primary-arrow" aria-hidden="true">→</span>
       </button>
-      <h2 class="head">Sections</h2>`;
-    for (const s of DATA.sections) {
-      const ss = stats(s.id);
-      const pct = ss.total ? Math.round((ss.known / ss.total) * 100) : 0;
-      html += `
-        <div class="section-row" data-section="${s.id}">
-          <span class="section-dot" style="background:${s.color}"></span>
-          <span style="flex:1">
-            <span class="name">${esc(s.title)}</span>
-            <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
-          </span>
-          <span class="counts">${ss.known}/${ss.total} known${ss.due ? `<br>${ss.due} due` : ""}</span>
+      <section class="home-section" aria-labelledby="sections-title">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">Explore your library</span>
+            <h2 id="sections-title">Sections</h2>
+          </div>
         </div>`;
-    }
+    for (const s of DATA.sections) html += sectionRowHtml(s, stats(s.id));
+    html += `</section>`;
     root.innerHTML = html;
     root.querySelector("#study-all").onclick = () => startSession(null);
     root.querySelectorAll(".section-row").forEach((el) => {
@@ -477,16 +511,27 @@
           <a class="vid-act" href="${esc(v.url)}" target="_blank" rel="noopener noreferrer">Watch on YouTube</a>
         </div>
       </div>
-      <div class="stat-grid">
-        <div class="stat due"><div class="num">${st.due}</div><div class="lbl">Due now</div></div>
-        <div class="stat known"><div class="num">${st.known}</div><div class="lbl">Known</div></div>
-        <div class="stat streak"><div class="num">${st.fresh}</div><div class="lbl">New</div></div>
+      <div class="status-stats">
+        <div><strong>${st.due}</strong><span>Due</span></div>
+        <div><strong>${st.known}</strong><span>Known</span></div>
+        <div><strong>${st.fresh}</strong><span>New</span></div>
       </div>
-      <button class="big-btn" id="study-video" ${members.length ? "" : "disabled"}>
-        ${queued ? `Study ${queued} concept${queued === 1 ? "" : "s"}` : `Review all ${members.length}`}
+      <button type="button" class="primary-action" id="study-video" ${members.length ? "" : "disabled"}>
+        <span>
+          <small>${queued ? "Study this video" : "Review this video"}</small>
+          <strong>${queued ? `Study ${queued} concept${queued === 1 ? "" : "s"}` : `Review all ${members.length}`}</strong>
+        </span>
+        <span class="primary-arrow" aria-hidden="true">→</span>
       </button>
-      <h2 class="head">Concepts from this video</h2>
-      <div id="vid-list">${members.map(conceptRow).join("") || `<div class="empty-note">No concepts linked yet.</div>`}</div>`;
+      <section class="home-section" aria-labelledby="vid-concepts-title">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">From this video</span>
+            <h2 id="vid-concepts-title">Concepts</h2>
+          </div>
+        </div>
+        <div id="vid-list">${members.map(conceptRow).join("") || `<div class="empty-note">No concepts linked yet.</div>`}</div>
+      </section>`;
     root.querySelector("#study-video").onclick = () =>
       startSession({ videoSlug: slug, all: queued === 0 });
     bindConceptRows(root.querySelector("#vid-list"));
@@ -628,10 +673,14 @@
       const fromVideo = session.videoSlug;
       root.innerHTML = `
         <div class="done-panel">
+          <span class="eyebrow">Session</span>
           <div class="emoji">&#127881;</div>
           <h3>Session complete</h3>
           <p>${session.done} cards reviewed. ${st.due} still due today.</p>
-          <button class="big-btn" id="again-btn" ${st.due + st.fresh === 0 ? "disabled" : ""}>Study more</button>
+          <button type="button" class="primary-action" id="again-btn" ${st.due + st.fresh === 0 ? "disabled" : ""}>
+            <span><small>Keep going</small><strong>Study more</strong></span>
+            <span class="primary-arrow" aria-hidden="true">→</span>
+          </button>
           ${fromVideo ? `<button class="big-btn secondary" id="video-btn">Back to the video</button>` : ""}
           <button class="big-btn secondary" id="home-btn">Back to home</button>
         </div>`;
@@ -642,21 +691,33 @@
       session = null;
       return;
     }
+    const queued = st.due + st.fresh;
     let html = `
-      <div class="panel">
-        <strong>${st.due}</strong> cards due &middot; <strong>${st.fresh}</strong> new &middot; <strong>${st.known}</strong> known
-      </div>
-      <button class="big-btn" id="study-all" ${st.due + st.fresh === 0 ? "disabled" : ""}>Study all due + new</button>
-      <h2 class="head">Study one section</h2>`;
-    for (const s of DATA.sections) {
-      const ss = stats(s.id);
-      html += `
-        <div class="section-row" data-section="${s.id}">
-          <span class="section-dot" style="background:${s.color}"></span>
-          <span class="name">${esc(s.title)}</span>
-          <span class="counts">${ss.due} due &middot; ${ss.fresh} new</span>
+      <section class="learning-hero" aria-labelledby="study-title">
+        <span class="eyebrow">Study queue</span>
+        <h2 id="study-title">${st.due} due · ${st.fresh} new</h2>
+        <div class="status-stats">
+          <div><strong>${st.due}</strong><span>Due</span></div>
+          <div><strong>${st.fresh}</strong><span>New</span></div>
+          <div><strong>${st.known}</strong><span>Known</span></div>
+        </div>
+      </section>
+      <button type="button" class="primary-action" id="study-all" ${queued === 0 ? "disabled" : ""}>
+        <span>
+          <small>${queued ? "Whole deck" : "You're caught up"}</small>
+          <strong>${queued ? "Study all due + new" : "No cards waiting"}</strong>
+        </span>
+        <span class="primary-arrow" aria-hidden="true">→</span>
+      </button>
+      <section class="home-section" aria-labelledby="study-sections-title">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">Narrow the queue</span>
+            <h2 id="study-sections-title">Study one section</h2>
+          </div>
         </div>`;
-    }
+    for (const s of DATA.sections) html += sectionRowHtml(s, stats(s.id), "study");
+    html += `</section>`;
     root.innerHTML = html;
     root.querySelector("#study-all").onclick = () => startSession(null);
     root.querySelectorAll(".section-row").forEach((el) => {
