@@ -162,7 +162,11 @@
     return (DATA.videos && DATA.videos[slug]) || null;
   }
   function thumbUrl(v) {
-    return v && v.id ? `https://i.ytimg.com/vi/${encodeURIComponent(v.id)}/mqdefault.jpg` : "";
+    if (v && v.thumbnail) return v.thumbnail;
+    if (v && v.id && !String(v.id).startsWith("BV")) {
+      return `https://i.ytimg.com/vi/${encodeURIComponent(v.id)}/mqdefault.jpg`;
+    }
+    return "";
   }
   function insightsUrl(slug) {
     return `${INSIGHTS_URL}#/v/${encodeURIComponent(slug)}`;
@@ -179,7 +183,7 @@
       ${list.map((slug) => {
         const v = videoOf(slug);
         const thumb = !compact && thumbUrl(v)
-          ? `<img class="video-thumb" src="${esc(thumbUrl(v))}" alt="" loading="lazy" decoding="async" />`
+          ? `<img class="video-thumb" src="${esc(thumbUrl(v))}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.style.display='none'" />`
           : `<span class="video-yt">▶</span>`;
         const sub = videoSubtitle(v);
         const insights = v.insights
