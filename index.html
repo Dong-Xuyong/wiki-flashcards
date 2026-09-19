@@ -9,8 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Encode+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script src="dong-ui/theme.js"></script>
-  <link rel="stylesheet" href="dong-ui/theme.css?v=5" />
-  <link rel="stylesheet" href="styles.css?v=5" />
+  <link rel="stylesheet" href="dong-ui/theme.css?v=6" />
+  <link rel="stylesheet" href="styles.css?v=6" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>" />
 </head>
 <body>
@@ -24,11 +24,14 @@
     </header>
 
     <main id="view-root" tabindex="-1">
-      <div id="loading">Loading concepts&hellip;</div>
+      <div id="loading" role="status">Loading concepts&hellip;</div>
     </main>
 
+    <div id="live-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div id="study-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+
     <nav id="tabbar" aria-label="Primary navigation">
-      <button type="button" data-tab="home" class="tab nav-tab active" aria-current="page">
+      <button type="button" data-tab="home" class="tab nav-tab active">
         <span class="tab-icon nav-icon" aria-hidden="true">&#8962;</span>
         <span>Home</span>
       </button>
@@ -42,11 +45,12 @@
       </button>
       <button type="button" data-tab="analytics" class="tab nav-tab">
         <span class="tab-icon nav-icon" aria-hidden="true">&#9636;</span>
-        <span>Analytics</span>
+        <span>Progress</span>
       </button>
     </nav>
   </div>
-  <script src="analytics.js"></script>
-  <script src="app.js"></script>
+  <script src="learning.js?v=8"></script>
+  <script src="analytics.js?v=8"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>
