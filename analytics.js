@@ -530,8 +530,82 @@
       </div>`;
   }
 
+  // ---------- cross-device merge ----------
+  const DAY_FIELDS = ["reviews", "known", "unknown", ...GRADE_KEYS];
+  const eventKey = (e) => `${e.t}|${e.type}|${e.slug || ""}|${e.grade ?? ""}`;
+
+  /** Union two analytics stores without double counting shared events. */
+  function mergeAnalytics(a, b) {
+    const seen = new Set();
+    const events = [];
+    for (const e of [...(a.events || []), ...(b.events || [])]) {
+      if (!e || typeof e.t !== "number" || seen.has(eventKey(e))) continue;
+      seen.add(eventKey(e));
+      events.push(e);
+    }
+    events.sort((x, y) => x.t - y.t);
+
+    const fromEvents = {};
+    const goalDays = new Set();
+    for (const e of events) {
+      const k = localDateKey(e.t);
+      if (e.type === "daily_goal_met") goalDays.add(k);
+      const d = fromEvents[k] || (fromEvents[k] = emptyDay());
+      if (e.type === "review") {
+        d.reviews += 1;
+        if (GRADE_INDEX[e.grade]) d[GRADE_INDEX[e.grade]] += 1;
+      } else if (e.type === "known") d.known += 1;
+      else if (e.type === "unknown") d.unknown += 1;
+    }
+    // Events are capped, so per-day totals take the max of each source.
+    const days = {};
+    const aDays = a.days || {}, bDays = b.days || {};
+    for (const k of new Set([...Object.keys(aDays), ...Object.keys(bDays), ...Object.keys(fromEvents)])) {
+      const d = emptyDay();
+      for (const f of DAY_FIELDS) {
+        d[f] = Math.max((aDays[k] || {})[f] || 0, (bDays[k] || {})[f] || 0, (fromEvents[k] || {})[f] || 0);
+      }
+      days[k] = d;
+    }
+
+    return prune({
+      events,
+      days,
+      dailyGoalDays: Math.max(goalDays.size, Number(a.dailyGoalDays) || 0, Number(b.dailyGoalDays) || 0),
+      sessionsCompleted: Math.max(Number(a.sessionsCompleted) || 0, Number(b.sessionsCompleted) || 0),
+      earnedBadges: [...new Set([...(a.earnedBadges || []), ...(b.earnedBadges || [])])],
+      seenBadges: [...new Set([...(a.seenBadges || []), ...(b.seenBadges || [])])],
+      bootstrapped: !!(a.bootstrapped || b.bootstrapped),
+    });
+  }
+
+  /** Per card, the most recently touched copy wins. */
+  function mergeCards(a, b) {
+    const out = Object.assign({}, a);
+    for (const [slug, theirs] of Object.entries(b || {})) {
+      const mine = out[slug];
+      if (!mine) { out[slug] = theirs; continue; }
+      const score = (c) => [c.last || 0, c.reps || 0, c.due || 0];
+      const [m, t] = [score(mine), score(theirs)];
+      const i = m.findIndex((v, j) => v !== t[j]);
+      if (i >= 0 && t[i] > m[i]) out[slug] = theirs;
+    }
+    return out;
+  }
+
+  function mergeFrom(other) {
+    const merged = mergeAnalytics(load(), other || {});
+    save(merged);
+    return merged;
+  }
+
   window.WikiAnalytics = {
     record,
+    mergeAnalytics,
+    mergeCards,
+    mergeFrom,
+    load,
+    STORE_KEY,
     getSummary,
     getTimeline,
     getKnownProgress,

@@ -116,6 +116,7 @@
   function markKnown(slug) {
     const c = card(slug);
     c.st = "known";
+    c.last = Date.now();
     save();
     window.WikiAnalytics?.record({ type: "known", slug });
   }
@@ -123,6 +124,7 @@
     const c = card(slug);
     c.st = "unknown";
     c.due = Date.now();
+    c.last = c.due;
     save();
     window.WikiAnalytics?.record({ type: "unknown", slug });
   }
@@ -161,6 +163,7 @@
   function grade(slug, g) {
     const c = card(slug);
     c.reps += 1;
+    c.last = Date.now();
     if (g === 0) {
       c.ease = Math.max(1.3, c.ease - 0.2);
       c.int = 0;
@@ -470,6 +473,62 @@
     } else {
       el.innerHTML = `<div class="timeline-empty">Analytics module loading…</div>`;
     }
+    root.insertAdjacentHTML("beforeend", `
+      <section class="home-section" aria-labelledby="backup-title">
+        <h2 class="head" id="backup-title">Sync between devices</h2>
+        <p class="local-note">Export here, then Import on your other device. Import merges, so nothing is lost.</p>
+        <button type="button" class="hint-btn" id="export-progress">Export progress</button>
+        <button type="button" class="hint-btn" id="import-progress">Import and merge</button>
+        <input type="file" id="import-file" accept=".json,application/json" hidden>
+      </section>`);
+    const file = root.querySelector("#import-file");
+    root.querySelector("#export-progress").onclick = exportProgress;
+    root.querySelector("#import-progress").onclick = () => file.click();
+    file.onchange = () => {
+      const f = file.files && file.files[0];
+      if (f) f.text().then(importProgress);
+      file.value = "";
+    };
+  }
+
+  // ---------- cross-device backup ----------
+  const BACKUP_APP = "wiki-flashcards";
+  function notify(msg) {
+    if (window.WikiAnalytics?.toast) WikiAnalytics.toast(msg);
+    else alert(msg);
+  }
+  function exportProgress() {
+    const payload = {
+      app: BACKUP_APP,
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      cards: store.cards,
+      analytics: window.WikiAnalytics?.load?.() || null,
+    };
+    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${BACKUP_APP}-progress-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    notify("Progress exported");
+  }
+  function importProgress(text) {
+    let data;
+    try { data = JSON.parse(text); } catch (e) { notify("Not a valid JSON file"); return; }
+    if (!data || data.app !== BACKUP_APP || typeof data.cards !== "object") {
+      notify("This file is not a Wiki Flashcards backup");
+      return;
+    }
+    const preKey = `${STORE_KEY}-pre-import`;
+    if (localStorage.getItem(preKey) == null) {
+      localStorage.setItem(preKey, JSON.stringify({ cards: store.cards, analytics: window.WikiAnalytics?.load?.() }));
+    }
+    store.cards = WikiAnalytics.mergeCards(store.cards, data.cards);
+    save();
+    if (data.analytics) WikiAnalytics.mergeFrom(data.analytics);
+    notify(`Merged ${Object.keys(data.cards).length} cards from backup`);
+    render();
   }
 
   function completionBar(pct, label) {
