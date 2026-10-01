@@ -479,11 +479,15 @@
         <p class="local-note">Export here, then Import on your other device. Import merges, so nothing is lost.</p>
         <button type="button" class="hint-btn" id="export-progress">Export progress</button>
         <button type="button" class="hint-btn" id="import-progress">Import and merge</button>
+        <button type="button" class="hint-btn" id="github-save">Save to GitHub</button>
+        <button type="button" class="hint-btn" id="github-load">Import from GitHub</button>
         <input type="file" id="import-file" accept=".json,application/json" hidden>
       </section>`);
     const file = root.querySelector("#import-file");
     root.querySelector("#export-progress").onclick = exportProgress;
     root.querySelector("#import-progress").onclick = () => file.click();
+    root.querySelector("#github-save").onclick = () => githubSync("save");
+    root.querySelector("#github-load").onclick = () => githubSync("load");
     file.onchange = () => {
       const f = file.files && file.files[0];
       if (f) f.text().then(importProgress);
@@ -497,14 +501,17 @@
     if (window.WikiAnalytics?.toast) WikiAnalytics.toast(msg);
     else alert(msg);
   }
-  function exportProgress() {
-    const payload = {
+  function progressPayload() {
+    return {
       app: BACKUP_APP,
       version: 1,
       exportedAt: new Date().toISOString(),
       cards: store.cards,
       analytics: window.WikiAnalytics?.load?.() || null,
     };
+  }
+  function exportProgress() {
+    const payload = progressPayload();
     const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -513,12 +520,9 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     notify("Progress exported");
   }
-  function importProgress(text) {
-    let data;
-    try { data = JSON.parse(text); } catch (e) { notify("Not a valid JSON file"); return; }
-    if (!data || data.app !== BACKUP_APP || typeof data.cards !== "object") {
-      notify("This file is not a Wiki Flashcards backup");
-      return;
+  function applyProgress(data) {
+    if (!data || data.app !== BACKUP_APP || !data.cards || typeof data.cards !== "object") {
+      throw new Error("This file is not a Wiki Flashcards backup");
     }
     const preKey = `${STORE_KEY}-pre-import`;
     if (localStorage.getItem(preKey) == null) {
@@ -527,8 +531,24 @@
     store.cards = WikiAnalytics.mergeCards(store.cards, data.cards);
     save();
     if (data.analytics) WikiAnalytics.mergeFrom(data.analytics);
-    notify(`Merged ${Object.keys(data.cards).length} cards from backup`);
+  }
+  function importProgress(text) {
+    try {
+      const data = JSON.parse(text);
+      applyProgress(data);
+      notify(`Merged ${Object.keys(data.cards).length} cards from backup`);
+    } catch (e) {
+      notify(e instanceof SyntaxError ? "Not a valid JSON file" : e.message);
+      return;
+    }
     render();
+  }
+  function githubSync(mode) {
+    if (!window.GhSync) return notify("GitHub sync unavailable");
+    const run = mode === "save"
+      ? GhSync.save(BACKUP_APP, progressPayload, applyProgress)
+      : GhSync.load(BACKUP_APP, applyProgress);
+    run.then((msg) => { notify(msg); render(); }, (e) => notify(e.message));
   }
 
   function completionBar(pct, label) {
