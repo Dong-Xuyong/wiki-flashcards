@@ -2,8 +2,13 @@
  * dong-ui GitHub progress sync: one JSON file per app in a private repo.
  * The token lives in localStorage, shared by every app on this origin.
  *
- *   GhSync.save(appId, getPayload, applyPayload) -> Promise<message>
- *   GhSync.load(appId, applyPayload)             -> Promise<message>
+ *   GhSync.save(appId, getPayload, applyPayload, { quiet }) -> Promise<message>
+ *   GhSync.load(appId, applyPayload)                        -> Promise<message>
+ *
+ * quiet skips the confirm dialogs so an app can save on its own.
+ * A quiet save still merges via applyPayload, sends the current sha,
+ * and skips the PUT when the merged payload matches the remote file
+ * (exportedAt is ignored). A 409 still rejects so the caller can retry once.
  */
 (function (global) {
   "use strict";
@@ -65,11 +70,29 @@
     });
   }
 
-  function save(appId, getPayload, applyPayload) {
+  function canonical(data) {
+    function sortValue(value) {
+      if (Array.isArray(value)) return value.map(sortValue);
+      if (value && typeof value === "object") {
+        var out = {};
+        Object.keys(value).sort().forEach(function (key) {
+          if (key === "exportedAt") return;
+          out[key] = sortValue(value[key]);
+        });
+        return out;
+      }
+      return value;
+    }
+    return JSON.stringify(sortValue(data == null ? null : data));
+  }
+
+  function save(appId, getPayload, applyPayload, opts) {
     var cfg;
+    var quiet = !!(opts && opts.quiet);
     if (
-      !global.confirm("Save " + appId + " progress to GitHub?") ||
-      !global.confirm("Are you sure? This updates the copy your other devices load.")
+      !quiet &&
+      (!global.confirm("Save " + appId + " progress to GitHub?") ||
+        !global.confirm("Are you sure? This updates the copy your other devices load."))
     ) {
       return Promise.reject(new Error("Save cancelled"));
     }
@@ -79,10 +102,12 @@
       return Promise.reject(e);
     }
     return fetchRemote(cfg, appId).then(function (remote) {
-      if (remote) applyPayload(remote.data);
+      if (remote && applyPayload) applyPayload(remote.data);
+      var payload = getPayload();
+      if (remote && canonical(remote.data) === canonical(payload)) return "Already in sync";
       var body = {
         message: "Save " + appId + " progress",
-        content: toBase64(JSON.stringify(getPayload())),
+        content: toBase64(JSON.stringify(payload)),
       };
       if (remote) body.sha = remote.sha;
       return request(cfg, "PUT", appId + ".json", body).then(function () {

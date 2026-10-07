@@ -77,6 +77,7 @@
   }
   function save() {
     localStorage.setItem(STORE_KEY, JSON.stringify(store));
+    if (!applyingRemote) queueMicrotask(scheduleIfChanged);
   }
   function saveSession() {
     if (!session) return;
@@ -120,16 +121,10 @@
     save();
     window.WikiAnalytics?.record({ type: "known", slug });
   }
-  function markUnknown(slug) {
-    const c = card(slug);
-    c.st = "unknown";
-    c.due = Date.now();
-    c.last = c.due;
-    save();
-    window.WikiAnalytics?.record({ type: "unknown", slug });
-  }
   function clearMark(slug) {
-    card(slug).st = null;
+    const c = card(slug);
+    c.st = null;
+    c.last = Date.now();
     save();
   }
 
@@ -473,33 +468,75 @@
     } else {
       el.innerHTML = `<div class="timeline-empty">Analytics module loading…</div>`;
     }
-    root.insertAdjacentHTML("beforeend", `
-      <section class="home-section" aria-labelledby="backup-title">
-        <h2 class="head" id="backup-title">Sync between devices</h2>
-        <p class="local-note">Export here, then Import on your other device. Import merges, so nothing is lost.</p>
-        <button type="button" class="hint-btn" id="export-progress">Export progress</button>
-        <button type="button" class="hint-btn" id="import-progress">Import and merge</button>
-        <button type="button" class="hint-btn" id="github-save">Save to GitHub</button>
-        <button type="button" class="hint-btn" id="github-load">Import from GitHub</button>
-        <input type="file" id="import-file" accept=".json,application/json" hidden>
-      </section>`);
-    const file = root.querySelector("#import-file");
-    root.querySelector("#export-progress").onclick = exportProgress;
-    root.querySelector("#import-progress").onclick = () => file.click();
-    root.querySelector("#github-save").onclick = () => githubSync("save");
-    root.querySelector("#github-load").onclick = () => githubSync("load");
-    file.onchange = () => {
-      const f = file.files && file.files[0];
-      if (f) f.text().then(importProgress);
-      file.value = "";
-    };
   }
 
-  // ---------- cross-device backup ----------
+  // ---------- automatic GitHub sync ----------
   const BACKUP_APP = "wiki-flashcards";
-  function notify(msg) {
-    if (window.WikiAnalytics?.toast) WikiAnalytics.toast(msg);
-    else alert(msg);
+  const SAVE_DELAY = 2500;
+  const syncLabel = document.getElementById("sync-label");
+  const connectEl = document.getElementById("connect");
+  const connectBtn = document.getElementById("btn-connect");
+  let saveTimer = null;
+  let saving = false;
+  let loadingSync = false;
+  let saveAgain = false;
+  let retried = false;
+  let applyingRemote = false;
+  let syncedSnapshot = null;
+
+  function pad2(n) {
+    return (n < 10 ? "0" : "") + n;
+  }
+  function hhmm() {
+    const now = new Date();
+    return pad2(now.getHours()) + ":" + pad2(now.getMinutes());
+  }
+  function hasToken() {
+    try {
+      const cfg = JSON.parse(localStorage.getItem("dong-gh-sync") || "null");
+      return !!(cfg && cfg.token);
+    } catch (e) {
+      return false;
+    }
+  }
+  function setSyncStatus(text) {
+    if (!syncLabel) return;
+    syncLabel.textContent = text || "";
+    syncLabel.title = text || "";
+  }
+  function showConnect() {
+    if (connectEl) connectEl.hidden = hasToken();
+  }
+  function progressSnapshot() {
+    return JSON.stringify({
+      cards: store.cards,
+      analytics: window.WikiAnalytics?.load?.() || null,
+    });
+  }
+  function failSync(err) {
+    setSyncStatus(err && err.message ? err.message : String(err));
+    showConnect();
+  }
+  function refreshIfProgressChanged(before) {
+    if (!DATA || progressSnapshot() === before) return;
+    if (document.querySelector("#study-wrap, .done-panel")) return;
+    const active = document.activeElement;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
+    render();
+  }
+  function scheduleIfChanged() {
+    if (progressSnapshot() === syncedSnapshot) return;
+    scheduleSync();
+  }
+  function scheduleSync() {
+    if (!window.GhSync || !hasToken()) {
+      showConnect();
+      if (!hasToken()) setSyncStatus("Not synced");
+      return;
+    }
+    retried = false;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(pushNow, SAVE_DELAY);
   }
   function progressPayload() {
     return {
@@ -510,16 +547,6 @@
       analytics: window.WikiAnalytics?.load?.() || null,
     };
   }
-  function exportProgress() {
-    const payload = progressPayload();
-    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${BACKUP_APP}-progress-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    notify("Progress exported");
-  }
   function applyProgress(data) {
     if (!data || data.app !== BACKUP_APP || !data.cards || typeof data.cards !== "object") {
       throw new Error("This file is not a Wiki Flashcards backup");
@@ -528,27 +555,104 @@
     if (localStorage.getItem(preKey) == null) {
       localStorage.setItem(preKey, JSON.stringify({ cards: store.cards, analytics: window.WikiAnalytics?.load?.() }));
     }
-    store.cards = WikiAnalytics.mergeCards(store.cards, data.cards);
-    save();
-    if (data.analytics) WikiAnalytics.mergeFrom(data.analytics);
-  }
-  function importProgress(text) {
+    applyingRemote = true;
     try {
-      const data = JSON.parse(text);
-      applyProgress(data);
-      notify(`Merged ${Object.keys(data.cards).length} cards from backup`);
+      store.cards = WikiAnalytics.mergeCards(store.cards, data.cards);
+      save();
+      if (data.analytics) WikiAnalytics.mergeFrom(data.analytics);
+    } finally {
+      applyingRemote = false;
+    }
+  }
+  function pushNow() {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    if (!window.GhSync || !hasToken()) {
+      showConnect();
+      if (!hasToken()) setSyncStatus("Not synced");
+      return Promise.resolve();
+    }
+    if (saving || loadingSync) {
+      saveAgain = true;
+      return Promise.resolve();
+    }
+    saving = true;
+    setSyncStatus("Syncing…");
+    const before = progressSnapshot();
+    let run;
+    try {
+      run = GhSync.save(BACKUP_APP, progressPayload, applyProgress, { quiet: true });
     } catch (e) {
-      notify(e instanceof SyntaxError ? "Not a valid JSON file" : e.message);
+      saving = false;
+      failSync(e);
+      return Promise.resolve();
+    }
+    return run.then(() => {
+      saving = false;
+      retried = false;
+      syncedSnapshot = progressSnapshot();
+      setSyncStatus("Synced " + hhmm());
+      showConnect();
+      refreshIfProgressChanged(before);
+      if (saveAgain) {
+        saveAgain = false;
+        return pushNow();
+      }
+    }, (err) => {
+      saving = false;
+      showConnect();
+      if (!retried && /another device/.test(String(err && err.message))) {
+        retried = true;
+        setSyncStatus("Syncing…");
+        saveTimer = setTimeout(pushNow, 1000);
+        return;
+      }
+      failSync(err);
+    });
+  }
+  function pull() {
+    if (!window.GhSync) {
+      setSyncStatus("GitHub sync failed to load.");
+      return Promise.resolve();
+    }
+    if (saving) {
+      saveAgain = true;
+      return Promise.resolve();
+    }
+    if (loadingSync) return Promise.resolve();
+    loadingSync = true;
+    setSyncStatus("Syncing…");
+    const before = progressSnapshot();
+    let run;
+    try {
+      run = GhSync.load(BACKUP_APP, applyProgress);
+    } catch (e) {
+      loadingSync = false;
+      failSync(e);
+      return Promise.resolve();
+    }
+    return run.then(() => {
+      loadingSync = false;
+      showConnect();
+      refreshIfProgressChanged(before);
+      return pushNow();
+    }, (err) => {
+      loadingSync = false;
+      failSync(err);
+    });
+  }
+  function autoLoad() {
+    showConnect();
+    if (!window.GhSync) {
+      setSyncStatus("GitHub sync failed to load.");
       return;
     }
-    render();
-  }
-  function githubSync(mode) {
-    if (!window.GhSync) return notify("GitHub sync unavailable");
-    const run = mode === "save"
-      ? GhSync.save(BACKUP_APP, progressPayload, applyProgress)
-      : GhSync.load(BACKUP_APP, applyProgress);
-    run.then((msg) => { notify(msg); render(); }, (e) => notify(e.message));
+    if (!hasToken()) {
+      setSyncStatus("Not synced");
+      return;
+    }
+    if (loadingSync || saving || saveTimer) return;
+    pull();
   }
 
   function completionBar(pct, label) {
@@ -1126,6 +1230,19 @@
   });
   if (!history.state) history.replaceState({ d: 0 }, "");
 
+  if (connectBtn) {
+    connectBtn.addEventListener("click", () => {
+      if (!loadingSync && !saving) pull();
+    });
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && saveTimer) pushNow();
+    if (document.visibilityState === "visible") autoLoad();
+  });
+  showConnect();
+  if (!window.GhSync) setSyncStatus("GitHub sync failed to load.");
+  else setSyncStatus(hasToken() ? "Syncing…" : "Not synced");
+
   fetch("data/concepts.json")
     .then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -1138,7 +1255,12 @@
       session = hydrateSession(store.session);
       sessionPaused = !!session;
       window.WikiAnalytics?.bootstrapGamification?.({ dueCount: stats(null).due });
+      syncedSnapshot = progressSnapshot();
       render();
+      if (window.GhSync) {
+        setInterval(autoLoad, 60000);
+        autoLoad();
+      }
     })
     .catch((err) => {
       root.innerHTML = `<div class="empty-note">Failed to load data (${esc(err.message)}).<br>This app must be served over HTTP, not opened as a file.</div>`;
