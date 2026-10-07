@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Encode+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script src="dong-ui/theme.js"></script>
   <link rel="stylesheet" href="dong-ui/theme.css?v=6" />
-  <link rel="stylesheet" href="styles.css?v=6" />
+  <link rel="stylesheet" href="styles.css?v=7" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>" />
 </head>
 <body>
@@ -19,10 +19,16 @@
     <header id="topbar">
       <button id="back-btn" class="icon-btn hidden" aria-label="Back">&#8592;</button>
       <h1 id="topbar-title">Wiki Flashcards</h1>
-      <span id="topbar-meta"></span>
+      <div id="topbar-status">
+        <span id="topbar-meta"></span>
+        <span id="sync-label" aria-live="polite"></span>
+      </div>
       <a class="dong-home-link" href="https://dong-xuyong.github.io/" aria-label="Back to all apps" title="All apps"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"/></svg></a>
       <button type="button" data-dong-theme-toggle aria-label="Toggle color theme"></button>
     </header>
+    <div id="connect" hidden>
+      <button type="button" id="btn-connect">Connect GitHub to sync</button>
+    </div>
 
     <main id="view-root" tabindex="-1">
       <div id="loading" role="status">Loading concepts&hellip;</div>
@@ -50,8 +56,8 @@
       </button>
     </nav>
   </div>
-  <script src="dong-ui/gh-sync.js?v=2"></script>
+  <script src="dong-ui/gh-sync.js?v=3"></script>
   <script src="analytics.js?v=8"></script>
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>
