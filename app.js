@@ -7,12 +7,12 @@
   const GRADE_KEYS = ["again", "hard", "good", "easy"];
   const GRADE_LABELS = ["Again", "Hard", "Good", "Easy"];
   const ROUTE_TITLES = {
-    home: "Home · Wiki Review Cards",
-    library: "Library · Wiki Review Cards",
-    study: "Study · Wiki Review Cards",
-    analytics: "Progress · Wiki Review Cards",
-    concept: "Concept · Wiki Review Cards",
-    video: "Video · Wiki Review Cards",
+    home: "Home · Wiki Flashcards",
+    library: "Library · Wiki Flashcards",
+    study: "Study · Wiki Flashcards",
+    analytics: "Progress · Wiki Flashcards",
+    concept: "Concept · Wiki Flashcards",
+    video: "Video · Wiki Flashcards",
   };
 
   // Sibling app; relative when serving the repo root locally.
@@ -77,7 +77,6 @@
   }
   function save() {
     localStorage.setItem(STORE_KEY, JSON.stringify(store));
-    if (!applyingRemote) queueMicrotask(scheduleIfChanged);
   }
   function saveSession() {
     if (!session) return;
@@ -121,10 +120,16 @@
     save();
     window.WikiAnalytics?.record({ type: "known", slug });
   }
-  function clearMark(slug) {
+  function markUnknown(slug) {
     const c = card(slug);
-    c.st = null;
-    c.last = Date.now();
+    c.st = "unknown";
+    c.due = Date.now();
+    c.last = c.due;
+    save();
+    window.WikiAnalytics?.record({ type: "unknown", slug });
+  }
+  function clearMark(slug) {
+    card(slug).st = null;
     save();
   }
 
@@ -436,7 +441,7 @@
   function render() {
     const r = parseRoute();
     maybePauseSession(r.name);
-    document.title = ROUTE_TITLES[r.name] || "Wiki Review Cards";
+    document.title = ROUTE_TITLES[r.name] || "Wiki Flashcards";
     tabs.forEach((b) => {
       const on = b.dataset.tab === TAB_FOR[r.name];
       b.classList.toggle("active", on);
@@ -468,75 +473,21 @@
     } else {
       el.innerHTML = `<div class="timeline-empty">Analytics module loading…</div>`;
     }
+    root.insertAdjacentHTML("beforeend", `
+      <section class="home-section" aria-labelledby="backup-title">
+        <h2 class="head" id="backup-title">Sync between devices</h2>
+        <p class="local-note">Synced through these GitHub apps</p>
+        <a class="hint-btn" href="https://dong-xuyong.github.io/wiki-insights/">Wiki Insights</a>
+        <a class="hint-btn" href="https://dong-xuyong.github.io/wiki-flashcards/">Wiki Flashcards</a>
+        <a class="hint-btn" href="https://dong-xuyong.github.io/chinese-library/#library">Chinese Library</a>
+      </section>`);
   }
 
-  // ---------- automatic GitHub sync ----------
+  // ---------- cross-device backup ----------
   const BACKUP_APP = "wiki-flashcards";
-  const SAVE_DELAY = 2500;
-  const syncLabel = document.getElementById("sync-label");
-  const connectEl = document.getElementById("connect");
-  const connectBtn = document.getElementById("btn-connect");
-  let saveTimer = null;
-  let saving = false;
-  let loadingSync = false;
-  let saveAgain = false;
-  let retried = false;
-  let applyingRemote = false;
-  let syncedSnapshot = null;
-
-  function pad2(n) {
-    return (n < 10 ? "0" : "") + n;
-  }
-  function hhmm() {
-    const now = new Date();
-    return pad2(now.getHours()) + ":" + pad2(now.getMinutes());
-  }
-  function hasToken() {
-    try {
-      const cfg = JSON.parse(localStorage.getItem("dong-gh-sync") || "null");
-      return !!(cfg && cfg.token);
-    } catch (e) {
-      return false;
-    }
-  }
-  function setSyncStatus(text) {
-    if (!syncLabel) return;
-    syncLabel.textContent = text || "";
-    syncLabel.title = text || "";
-  }
-  function showConnect() {
-    if (connectEl) connectEl.hidden = hasToken();
-  }
-  function progressSnapshot() {
-    return JSON.stringify({
-      cards: store.cards,
-      analytics: window.WikiAnalytics?.load?.() || null,
-    });
-  }
-  function failSync(err) {
-    setSyncStatus(err && err.message ? err.message : String(err));
-    showConnect();
-  }
-  function refreshIfProgressChanged(before) {
-    if (!DATA || progressSnapshot() === before) return;
-    if (document.querySelector("#study-wrap, .done-panel")) return;
-    const active = document.activeElement;
-    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
-    render();
-  }
-  function scheduleIfChanged() {
-    if (progressSnapshot() === syncedSnapshot) return;
-    scheduleSync();
-  }
-  function scheduleSync() {
-    if (!window.GhSync || !hasToken()) {
-      showConnect();
-      if (!hasToken()) setSyncStatus("Not synced");
-      return;
-    }
-    retried = false;
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(pushNow, SAVE_DELAY);
+  function notify(msg) {
+    if (window.WikiAnalytics?.toast) WikiAnalytics.toast(msg);
+    else alert(msg);
   }
   function progressPayload() {
     return {
@@ -547,6 +498,16 @@
       analytics: window.WikiAnalytics?.load?.() || null,
     };
   }
+  function exportProgress() {
+    const payload = progressPayload();
+    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${BACKUP_APP}-progress-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    notify("Progress exported");
+  }
   function applyProgress(data) {
     if (!data || data.app !== BACKUP_APP || !data.cards || typeof data.cards !== "object") {
       throw new Error("This file is not a Wiki Flashcards backup");
@@ -555,104 +516,27 @@
     if (localStorage.getItem(preKey) == null) {
       localStorage.setItem(preKey, JSON.stringify({ cards: store.cards, analytics: window.WikiAnalytics?.load?.() }));
     }
-    applyingRemote = true;
-    try {
-      store.cards = WikiAnalytics.mergeCards(store.cards, data.cards);
-      save();
-      if (data.analytics) WikiAnalytics.mergeFrom(data.analytics);
-    } finally {
-      applyingRemote = false;
-    }
+    store.cards = WikiAnalytics.mergeCards(store.cards, data.cards);
+    save();
+    if (data.analytics) WikiAnalytics.mergeFrom(data.analytics);
   }
-  function pushNow() {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-    if (!window.GhSync || !hasToken()) {
-      showConnect();
-      if (!hasToken()) setSyncStatus("Not synced");
-      return Promise.resolve();
-    }
-    if (saving || loadingSync) {
-      saveAgain = true;
-      return Promise.resolve();
-    }
-    saving = true;
-    setSyncStatus("Syncing…");
-    const before = progressSnapshot();
-    let run;
+  function importProgress(text) {
     try {
-      run = GhSync.save(BACKUP_APP, progressPayload, applyProgress, { quiet: true });
+      const data = JSON.parse(text);
+      applyProgress(data);
+      notify(`Merged ${Object.keys(data.cards).length} cards from backup`);
     } catch (e) {
-      saving = false;
-      failSync(e);
-      return Promise.resolve();
-    }
-    return run.then(() => {
-      saving = false;
-      retried = false;
-      syncedSnapshot = progressSnapshot();
-      setSyncStatus("Synced " + hhmm());
-      showConnect();
-      refreshIfProgressChanged(before);
-      if (saveAgain) {
-        saveAgain = false;
-        return pushNow();
-      }
-    }, (err) => {
-      saving = false;
-      showConnect();
-      if (!retried && /another device/.test(String(err && err.message))) {
-        retried = true;
-        setSyncStatus("Syncing…");
-        saveTimer = setTimeout(pushNow, 1000);
-        return;
-      }
-      failSync(err);
-    });
-  }
-  function pull() {
-    if (!window.GhSync) {
-      setSyncStatus("GitHub sync failed to load.");
-      return Promise.resolve();
-    }
-    if (saving) {
-      saveAgain = true;
-      return Promise.resolve();
-    }
-    if (loadingSync) return Promise.resolve();
-    loadingSync = true;
-    setSyncStatus("Syncing…");
-    const before = progressSnapshot();
-    let run;
-    try {
-      run = GhSync.load(BACKUP_APP, applyProgress);
-    } catch (e) {
-      loadingSync = false;
-      failSync(e);
-      return Promise.resolve();
-    }
-    return run.then(() => {
-      loadingSync = false;
-      showConnect();
-      refreshIfProgressChanged(before);
-      return pushNow();
-    }, (err) => {
-      loadingSync = false;
-      failSync(err);
-    });
-  }
-  function autoLoad() {
-    showConnect();
-    if (!window.GhSync) {
-      setSyncStatus("GitHub sync failed to load.");
+      notify(e instanceof SyntaxError ? "Not a valid JSON file" : e.message);
       return;
     }
-    if (!hasToken()) {
-      setSyncStatus("Not synced");
-      return;
-    }
-    if (loadingSync || saving || saveTimer) return;
-    pull();
+    render();
+  }
+  function githubSync(mode) {
+    if (!window.GhSync) return notify("GitHub sync unavailable");
+    const run = mode === "save"
+      ? GhSync.save(BACKUP_APP, progressPayload, applyProgress)
+      : GhSync.load(BACKUP_APP, applyProgress);
+    run.then((msg) => { notify(msg); render(); }, (e) => notify(e.message));
   }
 
   function completionBar(pct, label) {
@@ -690,7 +574,7 @@
     const progress = progressFor(st.due);
     const xpLine = progress.level != null ? `Level ${progress.level}` : `${progress.xp || 0} XP`;
     const next = progress.nextBadge;
-    setChrome("Wiki Review Cards", studyChromeMeta(goal), false);
+    setChrome("Wiki Flashcards", studyChromeMeta(goal), false);
     let html = `
       <section class="learning-hero" aria-labelledby="learning-title">
         <div class="hero-topline">
@@ -1230,19 +1114,6 @@
   });
   if (!history.state) history.replaceState({ d: 0 }, "");
 
-  if (connectBtn) {
-    connectBtn.addEventListener("click", () => {
-      if (!loadingSync && !saving) pull();
-    });
-  }
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden" && saveTimer) pushNow();
-    if (document.visibilityState === "visible") autoLoad();
-  });
-  showConnect();
-  if (!window.GhSync) setSyncStatus("GitHub sync failed to load.");
-  else setSyncStatus(hasToken() ? "Syncing…" : "Not synced");
-
   fetch("data/concepts.json")
     .then((r) => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -1255,12 +1126,7 @@
       session = hydrateSession(store.session);
       sessionPaused = !!session;
       window.WikiAnalytics?.bootstrapGamification?.({ dueCount: stats(null).due });
-      syncedSnapshot = progressSnapshot();
       render();
-      if (window.GhSync) {
-        setInterval(autoLoad, 60000);
-        autoLoad();
-      }
     })
     .catch((err) => {
       root.innerHTML = `<div class="empty-note">Failed to load data (${esc(err.message)}).<br>This app must be served over HTTP, not opened as a file.</div>`;
