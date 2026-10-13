@@ -472,6 +472,7 @@
 
   // ---------- automatic GitHub sync ----------
   const BACKUP_APP = "wiki-flashcards";
+  const AGENT_APP = "wiki-flashcards-agent";
   const SAVE_DELAY = 2500;
   const syncLabel = document.getElementById("sync-label");
   const connectEl = document.getElementById("connect");
@@ -483,6 +484,9 @@
   let retried = false;
   let applyingRemote = false;
   let syncedSnapshot = null;
+  let agentUnion = [];
+  let agentList = [];
+  let agentViewDirty = false;
 
   function pad2(n) {
     return (n < 10 ? "0" : "") + n;
@@ -523,6 +527,94 @@
     const active = document.activeElement;
     if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
     render();
+  }
+  function refreshAgentView() {
+    if (!DATA || !agentViewDirty) return;
+    agentViewDirty = false;
+    if (document.querySelector("#study-wrap, .done-panel")) return;
+    const active = document.activeElement;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
+    render();
+  }
+  function projectAgentEntries() {
+    if (!DATA || !window.WikiAgent) return;
+    const sectionId = WikiAgent.AGENT_SECTION.id;
+    DATA.concepts = DATA.concepts.filter((c) => !c.fromAgent);
+    DATA.sections = DATA.sections.filter((s) => s.id !== sectionId);
+    bySlug = {};
+    for (const c of DATA.concepts) bySlug[c.slug] = c;
+    const surface = WikiAgent.surface(DATA.concepts, agentUnion, DATA.sections.map((s) => s.id));
+    if (surface.cards.some((c) => c.section === sectionId)) DATA.sections.push(WikiAgent.AGENT_SECTION);
+    for (const card of surface.cards) {
+      DATA.concepts.push(card);
+      bySlug[card.slug] = card;
+    }
+    agentList = surface.list;
+  }
+  function applyAgentFile(data) {
+    if (!window.WikiAgent) return;
+    const next = WikiAgent.unionEntries(agentUnion, data);
+    if (next === agentUnion) return;
+    agentUnion = next;
+    if (DATA) projectAgentEntries();
+    agentViewDirty = true;
+  }
+  function loadAgentSideFile() {
+    if (!window.GhSync || !window.WikiAgent || !hasToken()) return Promise.resolve();
+    let run;
+    try {
+      run = GhSync.load(AGENT_APP, applyAgentFile);
+    } catch (e) {
+      return Promise.resolve();
+    }
+    return run.then(() => {
+      refreshAgentView();
+    }, () => {
+      agentViewDirty = false;
+    });
+  }
+  function visibleAgentItems() {
+    if (!agentList.length) return [];
+    if (libSearch) {
+      const q = libSearch.toLowerCase();
+      return agentList.filter((item) =>
+        `${item.title} ${item.note} ${item.conceptSlug} ${item.q} ${item.a}`.toLowerCase().includes(q)
+      );
+    }
+    return libFilter === "all" ? agentList : [];
+  }
+  function agentListHtml(items) {
+    if (!items || !items.length) return "";
+    const rows = items.map((item) => {
+      const kind = (window.WikiAgent && WikiAgent.KIND_LABELS[item.kind]) || item.kind;
+      const open = item.openSlug
+        ? `<button type="button" class="agent-open" data-slug="${esc(item.openSlug)}">Open card</button>`
+        : "";
+      const links = (item.links || []).map((link) =>
+        `<a class="agent-link" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)}</a>`
+      ).join("");
+      const note = item.note ? `<div class="row-author">${esc(item.note)}</div>` : "";
+      const question = item.q ? `<div class="row-author">Q: ${esc(item.q)}</div>` : "";
+      const actions = open || links ? `<div class="agent-actions">${open}${links}</div>` : "";
+      return `<div class="agent-row">
+        <div class="t"><span>${esc(item.title)}</span><span class="badge agent">${esc(kind)}</span></div>
+        ${note}${question}${actions}
+      </div>`;
+    }).join("");
+    return `<section class="home-section" aria-labelledby="agent-title">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">From the agent log</span>
+          <h2 id="agent-title">Added by agent</h2>
+        </div>
+      </div>
+      ${rows}
+    </section>`;
+  }
+  function bindAgentList(scope) {
+    scope.querySelectorAll(".agent-open").forEach((btn) => {
+      btn.onclick = () => go(`#/c/${encodeURIComponent(btn.dataset.slug)}`);
+    });
   }
   function scheduleIfChanged() {
     if (progressSnapshot() === syncedSnapshot) return;
@@ -635,7 +727,7 @@
       loadingSync = false;
       showConnect();
       refreshIfProgressChanged(before);
-      return pushNow();
+      return loadAgentSideFile().then(() => pushNow());
     }, (err) => {
       loadingSync = false;
       failSync(err);
@@ -705,7 +797,8 @@
           <button type="button" id="stat-streak"><strong>${studyStreak()}</strong><span>Streak</span></button>
         </div>
       </section>
-      ${primaryStudyBtn("study-all", queued)}`;
+      ${primaryStudyBtn("study-all", queued)}
+      ${agentListHtml(agentList)}`;
     if (next && badgeTitle(next)) {
       html += `
         <button type="button" class="milestone-card" id="milestone-card">
@@ -744,6 +837,7 @@
         go("#/library");
       };
     });
+    bindAgentList(root);
   }
 
   // ----- library -----
@@ -789,7 +883,8 @@
     let badge = "";
     if (isKnown(c.slug)) badge = `<span class="badge known">Known</span>`;
     else if (isUnknown(c.slug)) badge = `<span class="badge unknown">Unknown</span>`;
-    else if (isDue(c.slug)) badge = `<span class="badge due">Due</span>`;
+    else     if (isDue(c.slug)) badge = `<span class="badge due">Due</span>`;
+    if (c.fromAgent) badge += `<span class="badge agent">Agent</span>`;
     const kws = c.keywords.slice(0, 4).map((k) => `<span class="kw">${esc(k)}</span>`).join("");
     const emoji = c.e ? `<span class="row-emoji">${esc(c.e)}</span>` : "";
     const authors = (c.videos || []).map((s) => (videoOf(s) || {}).author).filter(Boolean);
@@ -809,13 +904,15 @@
     const list = root.querySelector("#lib-list");
     if (!list) return;
     const searching = !!libSearch || libFilter !== "all";
+    const agentHtml = agentListHtml(visibleAgentItems());
     let html = "";
     if (searching) {
       const matches = DATA.concepts.filter(conceptMatches).slice(0, 200);
-      html = matches.length
+      html = agentHtml + (matches.length
         ? matches.map(conceptRow).join("")
-        : `<div class="empty-note">No concepts match.</div>`;
+        : (agentHtml ? "" : `<div class="empty-note">No concepts match.</div>`));
     } else {
+      html += agentHtml;
       for (const s of DATA.sections) {
         const members = DATA.concepts.filter((c) => c.section === s.id);
         if (!members.length) continue;
@@ -845,6 +942,7 @@
       };
     });
     bindConceptRows(list);
+    bindAgentList(list);
   }
 
   function bindConceptRows(scope) {

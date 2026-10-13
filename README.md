@@ -17,6 +17,7 @@ Live: https://dong-xuyong.github.io/wiki-flashcards/
 - **Source videos** — `#/v/<source-slug>` studies one video's concepts; links into [Wiki Insights](https://dong-xuyong.github.io/wiki-insights/)
 - **Deep links** — `#/c/<concept-slug>` opens a card
 - Progress is kept in this browser and, once a GitHub token is saved (`dong-gh-sync`), merged and synced automatically with `wiki-flashcards.json` in Dong-Xuyong/progress-sync
+- Agent entries in `wiki-flashcards-agent.json` are read on that same sync and never written. A new concept or Q&A with a question and answer becomes a review card when that concept is not already in the deck; other entries show in an Added by agent list
 
 ## Stack
 
@@ -54,4 +55,5 @@ the app points at `../wiki-insights/`; everywhere else it uses the public URL.
 ```bash
 node tests/learning-model.js
 node tests/gh-sync-auto.test.mjs
+node tests/agent-feed.test.mjs
 ```
