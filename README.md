@@ -20,29 +20,22 @@ Live: https://dong-xuyong.github.io/wiki-flashcards/
 
 ## Stack
 
-Plain HTML/CSS/JS, no build step. `data/concepts.json` is generated from the wiki
-by `scripts/build_wiki_flashcards_data.py` in the source (private) repo, which merges
-hand-written Q&A pairs with concept metadata (title, definition, keywords, section,
-related concepts).
+Plain HTML/CSS/JS, no build step. `data/concepts.json` is a committed snapshot of the wiki
+concepts: hand-written Q&A pairs merged with concept metadata (title, definition, keywords,
+section, related concepts). There is currently no build script that regenerates it.
 
 Each concept carries `videos` as a list of source slugs resolving against a shared
 top-level `videos` index, so video metadata is stored once. Those slugs are the same
 ones Wiki Insights uses, which is what makes the cross-app links line up. The link
 itself comes from the `## Sources` section of each concept page in the vault.
 
-## Updating content (automatic)
+## Updating content
 
-In the Second Brain source repo, after any `youtube-wiki/wiki/concepts/` change:
+`data/concepts.json` is updated by committing a new snapshot to this repo; GitHub Pages
+redeploys automatically. Agents record new or updated concepts (not card state) in the private
+`Dong-Xuyong/progress-sync` repo with `scripts/sync_wiki_flashcards.py` (see
+`wiki-insights/AGENT_INSIGHTS_SPEC.md` there).
 
-```bash
-python scripts/sync_wiki_flashcards.py
-```
-
-That rebuilds `data/concepts.json` from the full wiki and pushes this repo. GitHub Pages redeploys automatically.
-
-Also wired in that repo:
-- Wiki ingest step 9 in `youtube-wiki/AGENTS.md` requires the sync after concept updates
-- Cursor hooks mark concept/Q&A edits dirty and run the sync on session stop
 ## Run locally
 
 ```bash
