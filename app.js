@@ -7,12 +7,12 @@
   const GRADE_KEYS = ["again", "hard", "good", "easy"];
   const GRADE_LABELS = ["Again", "Hard", "Good", "Easy"];
   const ROUTE_TITLES = {
-    home: "Home · Wiki Flashcards",
-    library: "Library · Wiki Flashcards",
-    study: "Study · Wiki Flashcards",
-    analytics: "Progress · Wiki Flashcards",
-    concept: "Concept · Wiki Flashcards",
-    video: "Video · Wiki Flashcards",
+    home: "Home · Wiki Review Cards",
+    library: "Library · Wiki Review Cards",
+    study: "Study · Wiki Review Cards",
+    analytics: "Progress · Wiki Review Cards",
+    concept: "Concept · Wiki Review Cards",
+    video: "Video · Wiki Review Cards",
   };
 
   // Sibling app; relative when serving the repo root locally.
@@ -441,7 +441,7 @@
   function render() {
     const r = parseRoute();
     maybePauseSession(r.name);
-    document.title = ROUTE_TITLES[r.name] || "Wiki Flashcards";
+    document.title = ROUTE_TITLES[r.name] || "Wiki Review Cards";
     tabs.forEach((b) => {
       const on = b.dataset.tab === TAB_FOR[r.name];
       b.classList.toggle("active", on);
@@ -574,7 +574,7 @@
     const progress = progressFor(st.due);
     const xpLine = progress.level != null ? `Level ${progress.level}` : `${progress.xp || 0} XP`;
     const next = progress.nextBadge;
-    setChrome("Wiki Flashcards", studyChromeMeta(goal), false);
+    setChrome("Wiki Review Cards", studyChromeMeta(goal), false);
     let html = `
       <section class="learning-hero" aria-labelledby="learning-title">
         <div class="hero-topline">
