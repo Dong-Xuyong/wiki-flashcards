@@ -167,16 +167,56 @@ html, body {
   margin: 0;
   font-size: 1.05rem;
   font-weight: 700;
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   letter-spacing: -0.02em;
   line-height: 1.2;
 }
 #topbar-title.hidden { display: none; }
-#topbar-meta {
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  font-weight: 500;
+#topbar-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 0;
+  max-width: 46%;
+  gap: 1px;
+  flex: 0 1 auto;
 }
+#topbar-meta:empty { display: none; }
+#topbar-meta,
+#sync-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  color: var(--text-dim);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+#connect {
+  flex-shrink: 0;
+  padding: 0.55rem 0.85rem 0;
+}
+#connect[hidden] { display: none; }
+#btn-connect {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+#btn-connect:active { transform: scale(0.99); }
 #topbar .dong-theme-toggle {
   position: static;
   flex-shrink: 0;
@@ -1145,6 +1185,49 @@ mark.hl {
 .badge.known { background: var(--green-soft); color: var(--green); }
 .badge.unknown { background: var(--red-soft); color: var(--red); }
 .badge.due { background: var(--amber-soft); color: var(--amber); }
+.badge.agent { background: var(--accent-soft); color: var(--accent); }
+.agent-row {
+  width: 100%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 13px 14px;
+  margin-bottom: 8px;
+  text-align: left;
+  box-shadow: var(--shadow-card);
+}
+.agent-row .t {
+  font-size: 0.93rem;
+  font-weight: 650;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.agent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.agent-open,
+.agent-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+.agent-open:active,
+.agent-link:active { opacity: 0.8; }
 
 .kw-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .kw {
@@ -1358,9 +1441,6 @@ mark.hl {
   cursor: pointer;
   margin-top: 14px;
   transition: border-color var(--dur-fast), color var(--dur-fast);
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
 }
 .hint-btn:active {
   border-color: var(--accent);
@@ -1413,12 +1493,6 @@ mark.hl {
   color: var(--green);
   border-color: rgba(74, 222, 128, 0.5);
   background: var(--green-soft);
-}
-.known-btn.mark-unknown.active,
-.known-btn.mark-unknown:active {
-  color: var(--red);
-  border-color: rgba(240, 113, 120, 0.5);
-  background: var(--red-soft);
 }
 
 .done-panel { text-align: center; padding: 44px 16px; }
@@ -1806,6 +1880,7 @@ button.flashcard:focus-visible,
 .toggle-known-btn:focus-visible,
 .lib-group-head:focus-visible,
 .hint-btn:focus-visible,
+#btn-connect:focus-visible,
 .video-act:focus-visible,
 .vid-act:focus-visible,
 .milestone-card > button:focus-visible,
