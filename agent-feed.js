@@ -87,15 +87,28 @@
     return null;
   }
 
+  /** Older deck concepts store a trimmed emoji string on `e`. `emoji` is the same value. */
+  function emojiOf(value) {
+    if (!value || typeof value !== "object") return "";
+    var emoji = text(value.e);
+    return emoji || text(value.emoji);
+  }
+
+  function paintEmoji(concept, entry) {
+    if (!concept || text(concept.e)) return;
+    var emoji = emojiOf(entry);
+    if (emoji) concept.e = emoji;
+  }
+
   function toConcept(entry, slug, title, qa, known) {
     var section = text(entry.section);
     return {
       slug: slug,
       title: title,
-      e: text(entry.e || entry.emoji),
+      e: emojiOf(entry),
       x: text(entry.x || entry.example),
-      q: qa.q,
-      a: qa.a,
+      q: qa && qa.q ? qa.q : "",
+      a: qa && qa.a ? qa.a : "",
       definition: text(entry.definition),
       keywords: strList(entry.keywords),
       section: section && known.has(section) ? section : AGENT_SECTION.id,
@@ -150,6 +163,15 @@
       title = text(entry.title);
       qa = pair(entry);
       hit = findConcept(entry, deck);
+      paintEmoji(hit, entry);
+      // A new concept joins the deck as a normal concept. Q&A is optional;
+      // concepts already in the deck are not listed a second time.
+      if (kind === "new_concept" && slug && title && !hit) {
+        concept = toConcept(entry, slug, title, qa, known);
+        cards.push(concept);
+        deck.push(concept);
+        continue;
+      }
       if (CARD_KINDS[kind] && slug && title && qa && !hit) {
         concept = toConcept(entry, slug, title, qa, known);
         cards.push(concept);
@@ -175,6 +197,7 @@
     APP: APP,
     AGENT_SECTION: AGENT_SECTION,
     KIND_LABELS: KIND_LABELS,
+    emojiOf: emojiOf,
     unionEntries: unionEntries,
     surface: surface,
   };

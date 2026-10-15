@@ -31,9 +31,9 @@ const missing = WikiAgent.unionEntries([], undefined);
 assert.deepEqual(missing, []);
 
 const first = file([
-  { id: "fc_llm-token-cost-reduction", kind: "new_concept", conceptSlug: "llm-token-cost-reduction", title: "Llm Token Cost Reduction", note: "thin" },
+  { id: "fc_llm-token-cost-reduction", kind: "new_concept", conceptSlug: "llm-token-cost-reduction", title: "Llm Token Cost Reduction", note: "thin", e: "💸" },
   { id: "fc_llm-token-cost-reduction", kind: "new_concept", conceptSlug: "llm-token-cost-reduction", title: "Duplicate should lose", note: "second" },
-  { id: "fc_prompt-caching_20261013", kind: "updated_concept", conceptSlug: "prompt-caching", title: "Prompt Caching", note: "Updated", links: [{ label: "commit", url: "https://github.com/Dong-Xuyong/second-brain/commit/0518da2" }, { label: "bad", url: "javascript:alert(1)" }] },
+  { id: "fc_prompt-caching_20261013", kind: "updated_concept", conceptSlug: "prompt-caching", title: "Prompt Caching", note: "Updated", emoji: "⚡", links: [{ label: "commit", url: "https://github.com/Dong-Xuyong/second-brain/commit/0518da2" }, { label: "bad", url: "javascript:alert(1)" }] },
   { id: "fc_note_1", kind: "note", conceptSlug: "prompt-caching", title: "A note", note: "just a note" },
 ]);
 union = WikiAgent.unionEntries([], first);
@@ -51,9 +51,15 @@ const added = WikiAgent.unionEntries(union, file([
 ]));
 assert.equal(added.length, 8);
 
+assert.equal(WikiAgent.emojiOf({ e: " 🙏 " }), "🙏");
+assert.equal(WikiAgent.emojiOf({ e: "", emoji: "📘" }), "📘");
+assert.equal(WikiAgent.emojiOf({ emoji: "🧠" }), "🧠");
+assert.equal(WikiAgent.emojiOf({}), "");
+assert.equal(WikiAgent.emojiOf(null), "");
+
 const surface = WikiAgent.surface(deck, added, sections);
 const cardSlugs = surface.cards.map((c) => c.slug).sort();
-assert.deepEqual(Array.from(cardSlugs), ["also-new", "fresh-qa"]);
+assert.deepEqual(Array.from(cardSlugs), ["also-new", "fresh-qa", "llm-token-cost-reduction"]);
 const fresh = surface.cards.find((c) => c.slug === "fresh-qa");
 assert.equal(fresh.q, "What is it?");
 assert.equal(fresh.a, "A card.");
@@ -69,7 +75,7 @@ assert.equal(also.q, "Why?");
 const listed = new Set(surface.list.map((row) => row.id));
 assert.equal(listed.has("fc_fresh-qa"), false, "a new card is not also listed");
 assert.equal(listed.has("fc_also-new"), false);
-assert.ok(listed.has("fc_llm-token-cost-reduction"), "a new concept without Q&A is listed");
+assert.equal(listed.has("fc_llm-token-cost-reduction"), false, "a new concept is a normal concept, not an agent-log row");
 assert.ok(listed.has("fc_prompt-caching_20261013"));
 assert.ok(listed.has("fc_note_1"));
 assert.ok(listed.has("fc_legacy"), "Q&A for an existing concept id is not a second card");
@@ -86,10 +92,11 @@ const legacy = surface.list.find((row) => row.id === "fc_legacy");
 assert.equal(legacy.openSlug, "legacy-id");
 assert.equal(legacy.q, "Q?");
 
-const thin = surface.list.find((row) => row.id === "fc_llm-token-cost-reduction");
-assert.equal(thin.openSlug, "");
-assert.equal(thin.note, "thin");
-assert.equal(WikiAgent.KIND_LABELS[thin.kind], "New concept");
+const thin = surface.cards.find((c) => c.slug === "llm-token-cost-reduction");
+assert.equal(thin.e, "💸");
+assert.equal(thin.title, "Llm Token Cost Reduction");
+assert.equal(deck[0].e, "⚡", "an existing concept picks up a missing emoji without a second card");
+assert.equal(WikiAgent.KIND_LABELS.new_concept, "New concept");
 
 const secondPass = WikiAgent.surface(deck.concat(surface.cards), added, sections);
 assert.equal(secondPass.cards.length, 0, "surfacing twice does not duplicate cards");
@@ -105,5 +112,23 @@ assert.ok(payloadStart > 0 && payloadEnd > payloadStart);
 assert.doesNotMatch(app.slice(payloadStart, payloadEnd), /agent/i, "save payload stays the flashcards backup");
 assert.match(app, /Added by agent/);
 assert.match(app, /Wiki Review Cards/);
+assert.match(app, /function emojiTag/);
+assert.match(app, /row-emoji/);
+assert.match(app, /detail-emoji/);
+assert.match(app, /card-emoji/);
+assert.doesNotMatch(app, /badge agent">Agent/);
+const libStart = app.indexOf("function renderLibList");
+const libEnd = app.indexOf("function bindConceptRows");
+assert.ok(libStart > 0 && libEnd > libStart);
+const library = app.slice(libStart, libEnd);
+assert.doesNotMatch(library, /agentListHtml/);
+assert.doesNotMatch(library, /From the agent log/);
+assert.doesNotMatch(library, /Added by agent/);
+assert.doesNotMatch(library, /agent-link/);
+assert.doesNotMatch(library, /badge agent/);
+const rowStart = app.indexOf("function conceptRow");
+const rowEnd = app.indexOf("function renderLibList");
+assert.doesNotMatch(app.slice(rowStart, rowEnd), /fromAgent/);
+assert.match(app, /isCommitLink/);
 
 console.log("agent feed tests passed");

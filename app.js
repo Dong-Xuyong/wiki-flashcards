@@ -204,10 +204,14 @@
 
   // ---------- queue building ----------
   /** Concepts matching a scope: whole deck, one section, or one source video. */
+  function hasReviewText(c) {
+    return !!(c && String(c.q || "").trim() && String(c.a || "").trim());
+  }
   function poolFor(opts) {
     const { sectionId, videoSlug } = opts || {};
     return DATA.concepts.filter(
       (c) =>
+        hasReviewText(c) &&
         (!sectionId || c.section === sectionId) &&
         (!videoSlug || (c.videos || []).includes(videoSlug))
     );
@@ -322,6 +326,14 @@
   }
   function sectionOf(id) {
     return DATA.sections.find((s) => s.id === id) || { title: id, color: "#888" };
+  }
+  function isAgentSection(id) {
+    return !!(window.WikiAgent && id === WikiAgent.AGENT_SECTION.id);
+  }
+  /** Section name shown on a concept. The agent bucket is not a library section. */
+  function sectionLabel(id) {
+    if (isAgentSection(id)) return "Library";
+    return sectionOf(id).title;
   }
 
   function setChrome(title, meta, showBack) {
@@ -583,6 +595,11 @@
     }
     return libFilter === "all" ? agentList : [];
   }
+  function isCommitLink(link) {
+    const label = String((link && link.label) || "").trim().toLowerCase();
+    const url = String((link && link.url) || "");
+    return label === "commit" || /github\.com\/[^/]+\/[^/]+\/commit\//i.test(url);
+  }
   function agentListHtml(items) {
     if (!items || !items.length) return "";
     const rows = items.map((item) => {
@@ -590,7 +607,7 @@
       const open = item.openSlug
         ? `<button type="button" class="agent-open" data-slug="${esc(item.openSlug)}">Open card</button>`
         : "";
-      const links = (item.links || []).map((link) =>
+      const links = (item.links || []).filter((link) => !isCommitLink(link)).map((link) =>
         `<a class="agent-link" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)}</a>`
       ).join("");
       const note = item.note ? `<div class="row-author">${esc(item.note)}</div>` : "";
@@ -817,7 +834,10 @@
             <h2 id="sections-title">Sections</h2>
           </div>
         </div>`;
-    for (const s of DATA.sections) html += sectionRowHtml(s, stats(s.id));
+    for (const s of DATA.sections) {
+      if (isAgentSection(s.id)) continue;
+      html += sectionRowHtml(s, stats(s.id));
+    }
     html += `</section>`;
     root.innerHTML = html;
     root.querySelector("#study-all").onclick = resumeOrStart;
@@ -873,20 +893,32 @@
       const sources = (c.videos || [])
         .map((s) => { const v = videoOf(s); return v ? `${v.author || ""} ${v.title || ""}` : ""; })
         .join(" ");
-      const hay = `${c.title} ${c.slug} ${c.keywords.join(" ")} ${sources}`.toLowerCase();
+      const hay = `${c.title} ${c.slug} ${(c.keywords || []).join(" ")} ${sources}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
+  }
+
+  function conceptEmoji(c) {
+    if (window.WikiAgent && typeof WikiAgent.emojiOf === "function") return WikiAgent.emojiOf(c);
+    if (!c || typeof c !== "object") return "";
+    const emoji = c.e == null ? "" : String(c.e).trim();
+    return emoji || (c.emoji == null ? "" : String(c.emoji).trim());
+  }
+  /** Same markup older concepts use. A missing emoji leaves the slot empty. */
+  function emojiTag(c, tag, className) {
+    const emoji = conceptEmoji(c);
+    if (!emoji) return "";
+    return `<${tag} class="${className}">${esc(emoji)}</${tag}>`;
   }
 
   function conceptRow(c) {
     let badge = "";
     if (isKnown(c.slug)) badge = `<span class="badge known">Known</span>`;
     else if (isUnknown(c.slug)) badge = `<span class="badge unknown">Unknown</span>`;
-    else     if (isDue(c.slug)) badge = `<span class="badge due">Due</span>`;
-    if (c.fromAgent) badge += `<span class="badge agent">Agent</span>`;
-    const kws = c.keywords.slice(0, 4).map((k) => `<span class="kw">${esc(k)}</span>`).join("");
-    const emoji = c.e ? `<span class="row-emoji">${esc(c.e)}</span>` : "";
+    else if (isDue(c.slug)) badge = `<span class="badge due">Due</span>`;
+    const kws = (c.keywords || []).slice(0, 4).map((k) => `<span class="kw">${esc(k)}</span>`).join("");
+    const emoji = emojiTag(c, "span", "row-emoji");
     const authors = (c.videos || []).map((s) => (videoOf(s) || {}).author).filter(Boolean);
     const uniqAuthors = [...new Set(authors)].slice(0, 2);
     const authorLine = uniqAuthors.length
@@ -904,16 +936,17 @@
     const list = root.querySelector("#lib-list");
     if (!list) return;
     const searching = !!libSearch || libFilter !== "all";
-    const agentHtml = agentListHtml(visibleAgentItems());
     let html = "";
     if (searching) {
       const matches = DATA.concepts.filter(conceptMatches).slice(0, 200);
-      html = agentHtml + (matches.length
+      html = matches.length
         ? matches.map(conceptRow).join("")
-        : (agentHtml ? "" : `<div class="empty-note">No concepts match.</div>`));
+        : `<div class="empty-note">No concepts match.</div>`;
     } else {
-      html += agentHtml;
+      const loose = DATA.concepts.filter((c) => isAgentSection(c.section) || !DATA.sections.some((s) => s.id === c.section));
+      if (loose.length) html += loose.map(conceptRow).join("");
       for (const s of DATA.sections) {
+        if (isAgentSection(s.id)) continue;
         const members = DATA.concepts.filter((c) => c.section === s.id);
         if (!members.length) continue;
         const open = !!store.libOpen[s.id];
@@ -942,7 +975,6 @@
       };
     });
     bindConceptRows(list);
-    bindAgentList(list);
   }
 
   function bindConceptRows(scope) {
@@ -955,14 +987,13 @@
   function renderDetail(slug) {
     const c = bySlug[slug];
     if (!c) return renderMissing("Concept not found.");
-    const sec = sectionOf(c.section);
-    setChrome(sec.title, "", true);
+    setChrome(sectionLabel(c.section), "", true);
     if (detailReveal.slug !== slug) {
       detailReveal = { slug, on: false };
     }
     const revealed = detailReveal.on;
     const known = isKnown(slug);
-    const emoji = c.e ? `<span class="detail-emoji">${esc(c.e)}</span>` : "";
+    const emoji = emojiTag(c, "span", "detail-emoji");
     root.innerHTML = `
       <div class="detail-title">${emoji}${esc(c.title)}
         ${known ? '<span class="badge known">Known</span>' : isUnknown(slug) ? '<span class="badge unknown">Unknown</span>' : ""}
@@ -1136,8 +1167,8 @@
         <div id="study-wrap">
           ${studyProgressHtml()}
           <button type="button" class="flashcard" id="card" aria-label="Reveal answer">
-            <div class="side-label" style="color:${sec.color}">Question &middot; ${esc(sec.title)}</div>
-            ${c.e ? `<div class="card-emoji">${esc(c.e)}</div>` : ""}
+            <div class="side-label" style="color:${sec.color}">Question &middot; ${esc(sectionLabel(c.section))}</div>
+            ${emojiTag(c, "div", "card-emoji")}
             <div class="q-text">${rich(c.q)}</div>
             <div class="tap-hint">Tap card to reveal answer</div>
           </button>
@@ -1166,7 +1197,7 @@
           ${studyProgressHtml()}
           <div class="flashcard">
             <div class="side-label" style="color:${sec.color}">Answer</div>
-            ${c.e ? `<div class="card-emoji small">${esc(c.e)}</div>` : ""}
+            ${emojiTag(c, "div", "card-emoji small")}
             <div class="a-text">${rich(c.a)}</div>
             ${c.x ? `<div class="x-text"><span class="x-label">Example</span>${rich(c.x)}</div>` : ""}
             <div class="concept-name">${esc(c.title)}</div>
@@ -1349,7 +1380,10 @@
     .then((data) => {
       DATA = data;
       DATA.videos = DATA.videos || {};
-      for (const c of data.concepts) bySlug[c.slug] = c;
+      for (const c of data.concepts) {
+        if (c) c.e = conceptEmoji(c);
+        bySlug[c.slug] = c;
+      }
       session = hydrateSession(store.session);
       sessionPaused = !!session;
       window.WikiAnalytics?.bootstrapGamification?.({ dueCount: stats(null).due });
