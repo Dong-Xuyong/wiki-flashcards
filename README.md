@@ -17,7 +17,7 @@ Live: https://dong-xuyong.github.io/wiki-flashcards/
 - **Source videos** — `#/v/<source-slug>` studies one video's concepts; links into [Wiki Insights](https://dong-xuyong.github.io/wiki-insights/)
 - **Deep links** — `#/c/<concept-slug>` opens a card
 - Progress is kept in this browser and, once a GitHub token is saved (`dong-gh-sync`), merged and synced automatically with `wiki-flashcards.json` in Dong-Xuyong/progress-sync
-- Agent entries in `wiki-flashcards-agent.json` are read on that same sync and never written. A new concept or Q&A with a question and answer becomes a review card when that concept is not already in the deck; other entries show in an Added by agent list
+- Agent entries in `wiki-flashcards-agent.json` are read on that same sync and never written. A new concept joins the library as a normal concept, and becomes a review card when it has a question and answer and is not already in the deck. Other entries stay on the home Added by agent list. The library does not show that list, an agent badge, or commit chips. Concept emoji is the `e` string older concepts use (`emoji` is accepted as the same value); a missing emoji leaves the slot empty.
 
 ## Stack
 
