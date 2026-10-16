@@ -16,6 +16,7 @@ Live: https://dong-xuyong.github.io/wiki-flashcards/
 - **Analytics** — fluency, recently fluent chips, SRS buckets, 30-day review chart, heatmap
 - **Source videos** — `#/v/<source-slug>` studies one video's concepts; links into [Wiki Insights](https://dong-xuyong.github.io/wiki-insights/)
 - **Deep links** — `#/c/<concept-slug>` opens a card
+- **AWS study** — `#/aws` tracks AWS Certified Cloud Practitioner (CLF-C02): domain confidence, practice scores, and a readiness meter. With no GitHub token the tab shows demo data. A saved token syncs `aws-study.json` in Dong-Xuyong/progress-sync, separate from flashcard progress.
 - Progress is kept in this browser and, once a GitHub token is saved (`dong-gh-sync`), merged and synced automatically with `wiki-flashcards.json` in Dong-Xuyong/progress-sync
 - Agent entries in `wiki-flashcards-agent.json` are read on that same sync and never written. A new concept joins the library as a normal concept, and becomes a review card when it has a question and answer and is not already in the deck. Other entries stay on the home Added by agent list. The library does not show that list, an agent badge, or commit chips. Concept emoji is the `e` string older concepts use (`emoji` is accepted as the same value); a missing emoji leaves the slot empty.
 
@@ -56,4 +57,5 @@ the app points at `../wiki-insights/`; everywhere else it uses the public URL.
 node tests/learning-model.js
 node tests/gh-sync-auto.test.mjs
 node tests/agent-feed.test.mjs
+node tests/aws-study.test.mjs
 ```

@@ -11,6 +11,7 @@
     library: "Library · Wiki Review Cards",
     study: "Study · Wiki Review Cards",
     analytics: "Progress · Wiki Review Cards",
+    aws: "AWS Cloud Practitioner",
     concept: "Concept · Wiki Review Cards",
     video: "Video · Wiki Review Cards",
   };
@@ -404,9 +405,9 @@
   }
 
   // ---------- routing ----------
-  const TAB_ROUTES = { home: "#/", library: "#/library", study: "#/study", analytics: "#/analytics" };
+  const TAB_ROUTES = { home: "#/", library: "#/library", study: "#/study", analytics: "#/analytics", aws: "#/aws" };
   // Detail views live under the Library tab.
-  const TAB_FOR = { home: "home", library: "library", study: "study", analytics: "analytics", concept: "library", video: "library" };
+  const TAB_FOR = { home: "home", library: "library", study: "study", analytics: "analytics", aws: "aws", concept: "library", video: "library" };
 
   function parseRoute() {
     const h = (location.hash || "#/").replace(/^#/, "");
@@ -417,6 +418,7 @@
     if (h.startsWith("/library")) return { name: "library" };
     if (h.startsWith("/study")) return { name: "study" };
     if (h.startsWith("/analytics")) return { name: "analytics" };
+    if (h.startsWith("/aws")) return { name: "aws" };
     return { name: "home" };
   }
 
@@ -460,6 +462,11 @@
     if (r.name === "library") return renderLibrary();
     if (r.name === "study") return renderStudy();
     if (r.name === "analytics") return renderAnalytics();
+    if (r.name === "aws") {
+      if (window.AwsStudy && typeof window.AwsStudy.render === "function") return window.AwsStudy.render(root);
+      root.textContent = "AWS study failed to load.";
+      return;
+    }
     return renderHome();
   }
 
