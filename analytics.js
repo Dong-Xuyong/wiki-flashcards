@@ -471,7 +471,7 @@
     const unlockedN = progress.badges.filter((b) => b.unlocked).length;
     container.innerHTML = `
       <div class="analytics-view">
-        <section class="level-card" aria-labelledby="level-title">
+        <section class="level-card dx-card" aria-labelledby="level-title">
           <div class="level-orb" aria-hidden="true">${esc(String(progress.level))}</div>
           <div class="level-main">
             <span class="eyebrow">Current level</span>
@@ -481,7 +481,7 @@
           </div>
           <strong>${esc(String(progress.xp))} XP</strong>
         </section>
-        ${nextBadge ? `<section class="next-badge">
+        ${nextBadge ? `<section class="next-badge dx-card">
           <span class="milestone-icon" aria-hidden="true">${esc(nextBadge.icon)}</span>
           <div><span class="eyebrow">Next achievement</span><h2>${esc(nextBadge.title)}</h2>
           <p>${esc(nextBadge.description)} · ${esc(String(nextBadge.current))}/${esc(String(nextBadge.goal))}</p></div>
@@ -493,7 +493,7 @@
           </div>
           <div class="achievement-grid">
             ${progress.badges.map((badge) => `
-              <article class="achievement-card ${badge.unlocked ? "unlocked" : "locked"}">
+              <article class="achievement-card dx-card ${badge.unlocked ? "unlocked" : "locked"}">
                 <div class="achievement-icon" aria-hidden="true">${esc(badge.icon)}</div>
                 <h3>${esc(badge.title)}</h3>
                 <p>${esc(badge.description)}</p>
@@ -502,7 +502,7 @@
           </div>
         </section>
         <p class="local-note">Progress, XP, streaks, and badges are stored only in this browser.</p>
-        <header class="analytics-hero">
+        <header class="analytics-hero dx-card">
           <h2>Progress</h2>
           <p>${esc(insight)}</p>
           <div class="hero-meta">
@@ -511,10 +511,10 @@
           </div>
         </header>
         <div class="analytics-kpis" role="group" aria-label="Key stats">
-          <div class="kpi accent"><div class="kpi-value">${esc(summary.last30Reviews)}</div><div class="kpi-label">Reviews (30d)</div></div>
-          <div class="kpi good"><div class="kpi-value">${esc(knownCurrent)}</div><div class="kpi-label">Known</div></div>
-          <div class="kpi"><div class="kpi-value">${esc(summary.activeDays30)}</div><div class="kpi-label">Active days</div></div>
-          <div class="kpi warn"><div class="kpi-value">${esc(best.reviews ? best.label : "—")}</div><div class="kpi-label">Best day${best.reviews ? esc(` · ${best.reviews}`) : ""}</div></div>
+          <div class="kpi dx-card accent"><div class="kpi-value">${esc(summary.last30Reviews)}</div><div class="kpi-label">Reviews (30d)</div></div>
+          <div class="kpi dx-card good"><div class="kpi-value">${esc(knownCurrent)}</div><div class="kpi-label">Known</div></div>
+          <div class="kpi dx-card"><div class="kpi-value">${esc(summary.activeDays30)}</div><div class="kpi-label">Active days</div></div>
+          <div class="kpi dx-card warn"><div class="kpi-value">${esc(best.reviews ? best.label : "—")}</div><div class="kpi-label">Best day${best.reviews ? esc(` · ${best.reviews}`) : ""}</div></div>
         </div>
         <div class="progress-chart" role="img" aria-label="Bar chart of reviews over the last 30 days">
           <div class="chart-head">

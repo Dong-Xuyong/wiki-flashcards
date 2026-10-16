@@ -788,7 +788,7 @@
       ? `${ss.due} due · ${ss.fresh} new`
       : `${ss.known}/${ss.total} known${ss.due ? ` · ${ss.due} due` : ""}`;
     return `
-      <button type="button" class="section-row" data-section="${s.id}">
+      <button type="button" class="section-row dx-card" data-section="${s.id}">
         <span class="section-dot" style="background:${s.color}"></span>
         <span class="section-row-main">
           <span class="name">${esc(s.title)}</span>
@@ -811,7 +811,7 @@
     const next = progress.nextBadge;
     setChrome("Wiki Review Cards", studyChromeMeta(goal), false);
     let html = `
-      <section class="learning-hero" aria-labelledby="learning-title">
+      <section class="learning-hero dx-card" aria-labelledby="learning-title">
         <div class="hero-topline">
           <span class="eyebrow">Today</span>
           <span class="hero-xp">${esc(xpLine)}</span>
@@ -828,7 +828,7 @@
       ${agentListHtml(agentList)}`;
     if (next && badgeTitle(next)) {
       html += `
-        <button type="button" class="milestone-card" id="milestone-card">
+        <button type="button" class="milestone-card dx-card" id="milestone-card">
           <span class="milestone-icon" aria-hidden="true">★</span>
           <span>
             <span class="eyebrow">Next badge</span>
@@ -935,7 +935,7 @@
       ? `<span class="row-author">${esc(uniqAuthors.join(" · "))}</span>`
       : "";
     return `
-      <button type="button" class="concept-row" data-slug="${c.slug}">
+      <button type="button" class="concept-row dx-card" data-slug="${c.slug}">
         <span class="t">${emoji}<span>${esc(c.title)}</span>${badge}</span>
         ${authorLine}
         ${kws ? `<span class="kw-row">${kws}</span>` : ""}
@@ -962,7 +962,7 @@
         const open = !!store.libOpen[s.id];
         const bodyId = `lib-body-${s.id}`;
         html += `
-          <div class="lib-group ${open ? "open" : ""}" data-section="${s.id}">
+          <div class="lib-group dx-card ${open ? "open" : ""}" data-section="${s.id}">
             <button type="button" class="lib-group-head" aria-expanded="${open}" aria-controls="${bodyId}">
               <span class="section-dot" style="background:${s.color}"></span>
               <span class="name">${esc(s.title)}</span>
@@ -1009,7 +1009,7 @@
         ${known ? '<span class="badge known">Known</span>' : isUnknown(slug) ? '<span class="badge unknown">Unknown</span>' : ""}
       </div>
       ${c.keywords.length ? `<div class="kw-row">${c.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}
-      <div class="panel qa-block">
+      <div class="panel qa-block dx-card">
         <div class="q">Q: ${rich(c.q)}</div>
         ${revealed ? `<div class="a">A: ${rich(c.a)}</div>${c.x ? `<div class="x">Example: ${rich(c.x)}</div>` : ""}`
           : `<button type="button" class="reveal-answer" id="reveal-answer">Reveal answer</button>`}
@@ -1176,7 +1176,7 @@
       root.innerHTML = `
         <div id="study-wrap">
           ${studyProgressHtml()}
-          <button type="button" class="flashcard" id="card" aria-label="Reveal answer">
+          <button type="button" class="flashcard dx-card" id="card" aria-label="Reveal answer">
             <div class="side-label" style="color:${sec.color}">Question &middot; ${esc(sectionLabel(c.section))}</div>
             ${emojiTag(c, "div", "card-emoji")}
             <div class="q-text">${rich(c.q)}</div>
@@ -1205,7 +1205,7 @@
       root.innerHTML = `
         <div id="study-wrap">
           ${studyProgressHtml()}
-          <div class="flashcard">
+          <div class="flashcard dx-card">
             <div class="side-label" style="color:${sec.color}">Answer</div>
             ${emojiTag(c, "div", "card-emoji small")}
             <div class="a-text">${rich(c.a)}</div>
@@ -1312,7 +1312,7 @@
     }
     const queued = st.due + st.fresh;
     let html = `
-      <section class="learning-hero" aria-labelledby="study-title">
+      <section class="learning-hero dx-card" aria-labelledby="study-title">
         <span class="eyebrow">Study queue</span>
         <h2 id="study-title">${st.due} due · ${st.fresh} new</h2>
         <div class="status-stats">

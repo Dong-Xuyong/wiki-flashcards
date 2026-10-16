@@ -1242,7 +1242,7 @@
   function videoCardHtml(video, progress, { compact = false } = {}) {
     const updated = videoUpdatedLabel(video);
     return `
-      <article class="video-card${compact ? " is-compact" : ""}" data-slug="${esc(
+      <article class="video-card dx-card${compact ? " is-compact" : ""}" data-slug="${esc(
         video.slug
       )}" tabindex="0" role="link" aria-label="${esc(`${video.title}. ${watchLabel(progress)}`)}">
         <div class="video-card-top">
@@ -1319,7 +1319,7 @@
         ? `${stats.completed} of ${stats.total} completed`
         : `${visibleCount} ${status.replace("-", " ")}`;
     return `
-      <button type="button" class="category-row${visibleCount ? "" : " is-empty"}"
+      <button type="button" class="category-row dx-card${visibleCount ? "" : " is-empty"}"
         data-section="${esc(section.id)}" ${visibleCount ? "" : "disabled"}>
         <span class="category-icon" style="--section-color:${esc(section.color)}"></span>
         <span class="category-row-main">
@@ -1377,7 +1377,7 @@
 
     root.innerHTML = `
       ${subscriptionSelectHtml(library, sub)}
-      <section class="learning-hero" aria-labelledby="learning-title">
+      <section class="learning-hero dx-card" aria-labelledby="learning-title">
         <div class="hero-topline">
           <span class="eyebrow">Level ${account.level}</span>
           <span class="hero-xp">${account.xp} XP</span>
@@ -1438,7 +1438,7 @@
         </div>
       </section>
 
-      <section class="milestone-card" aria-labelledby="milestone-title">
+      <section class="milestone-card dx-card" aria-labelledby="milestone-title">
         <div class="milestone-icon" aria-hidden="true">${esc(nextBadge?.icon || "✓")}</div>
         <div>
           <span class="eyebrow">${nextBadge ? "Next achievement" : "Achievements complete"}</span>
@@ -1598,7 +1598,7 @@
               }
             </div>`
           : `<div class="category-list browse-categories">
-              <button type="button" class="category-row all-videos-row" data-section="all">
+              <button type="button" class="category-row dx-card all-videos-row" data-section="all">
                 <span class="category-icon all-icon" aria-hidden="true">≡</span>
                 <span class="category-row-main">
                   <span class="category-row-title">All videos</span>
@@ -1690,7 +1690,7 @@
     const nextBadge = badges.find((badge) => !badge.unlocked);
 
     root.innerHTML = `
-      <section class="level-card" aria-labelledby="level-title">
+      <section class="level-card dx-card" aria-labelledby="level-title">
         <div class="level-orb" aria-hidden="true">${summary.level}</div>
         <div class="level-main">
           <span class="eyebrow">Current level</span>
@@ -1709,7 +1709,7 @@
         <div><strong>${summary.exploredCategories}</strong><span>Categories</span></div>
       </div>
 
-      <section class="progress-overview" aria-labelledby="overview-title">
+      <section class="progress-overview dx-card" aria-labelledby="overview-title">
         <div class="section-heading">
           <div><span class="eyebrow">Library progress</span><h2 id="overview-title">${summary.completionPct}% completed</h2></div>
           <strong>${summary.completed}/${summary.total}</strong>
@@ -1724,7 +1724,7 @@
 
       ${
         nextBadge
-          ? `<section class="next-badge">
+          ? `<section class="next-badge dx-card">
               <span class="milestone-icon" aria-hidden="true">${esc(nextBadge.icon)}</span>
               <div><span class="eyebrow">Next achievement</span><h2>${esc(nextBadge.title)}</h2>
               <p>${esc(nextBadge.description)} · ${nextBadge.current}/${nextBadge.goal}</p></div>
@@ -1741,7 +1741,7 @@
           ${badges
             .map(
               (badge) => `
-                <article class="achievement-card${badge.unlocked ? " unlocked" : " locked"}">
+                <article class="achievement-card dx-card${badge.unlocked ? " unlocked" : " locked"}">
                   <div class="achievement-icon" aria-hidden="true">${esc(badge.icon)}</div>
                   <h3>${esc(badge.title)}</h3>
                   <p>${esc(badge.description)}</p>
@@ -2155,7 +2155,7 @@
       <div class="concept-grid">
         ${list
           .map(
-            (c) => `<article class="concept-card">
+            (c) => `<article class="concept-card dx-card">
             <a class="concept-chip" href="${esc(
               `${FLASHCARDS_URL}#/c/${encodeURIComponent(c.slug)}`
             )}">
