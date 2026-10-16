@@ -1923,31 +1923,6 @@ html.dark #tabbar {
 }
 
 /* AWS study */
-#tabbar {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  padding-left: 0.15rem;
-  padding-right: 0.15rem;
-}
-.tab,
-.nav-tab {
-  min-width: 0;
-  gap: 0.05rem;
-  padding: 0 0.05rem;
-  font-size: 0.62rem;
-  letter-spacing: 0;
-}
-.tab-icon,
-.nav-icon {
-  font-size: 1.05rem;
-}
-.nav-tab > span:last-child,
-.tab > span:last-child {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .aws-study {
   display: flex;
   flex-direction: column;

@@ -1,8 +1,16 @@
-# Wiki Flashcards
+# Study
 
-Mobile-first flashcards app for learning the concepts from my YouTube wiki.
+Mobile-first study app: Wiki Review Cards, AWS Cloud Practitioner, and YouTube Wiki Insights.
 
 Live: https://dong-xuyong.github.io/wiki-flashcards/
+
+Three sections share a suite nav under the header:
+
+- **Cards** — `/wiki-flashcards/#/` (Home, Library, Study, Progress)
+- **AWS** — `/wiki-flashcards/#/aws`
+- **Insights** — `/wiki-flashcards/insights/` (sub-folder of this repo)
+
+`/wiki-insights/` redirects to `/wiki-flashcards/insights/`, keeping the same search and hash.
 
 ## Features
 
@@ -14,9 +22,9 @@ Live: https://dong-xuyong.github.io/wiki-flashcards/
 - **Spaced repetition** — SM-2-lite; first Hard / Good / Easy use 1 / 2 / 4 day intervals
 - **Streak** — consecutive local days with at least one graded review
 - **Analytics** — fluency, recently fluent chips, SRS buckets, 30-day review chart, heatmap
-- **Source videos** — `#/v/<source-slug>` studies one video's concepts; links into [Wiki Insights](https://dong-xuyong.github.io/wiki-insights/)
+- **Source videos** — `#/v/<source-slug>` studies one video's concepts; Insights links open `/wiki-flashcards/insights/#/v/<slug>`
 - **Deep links** — `#/c/<concept-slug>` opens a card
-- **AWS study** — `#/aws` tracks AWS Certified Cloud Practitioner (CLF-C02): domain confidence, practice scores, and a readiness meter. With no GitHub token the tab shows demo data. A saved token syncs `aws-study.json` in Dong-Xuyong/progress-sync, separate from flashcard progress.
+- **AWS study** — suite tab `#/aws` tracks AWS Certified Cloud Practitioner (CLF-C02): domain confidence, practice scores, and a readiness meter. With no GitHub token the tab shows demo data. A saved token syncs `aws-study.json` in Dong-Xuyong/progress-sync, separate from flashcard progress. AWS is not a bottom-bar tab.
 - Progress is kept in this browser and, once a GitHub token is saved (`dong-gh-sync`), merged and synced automatically with `wiki-flashcards.json` in Dong-Xuyong/progress-sync
 - Agent entries in `wiki-flashcards-agent.json` are read on that same sync and never written. A new concept joins the library as a normal concept, and becomes a review card when it has a question and answer and is not already in the deck. Other entries stay on the home Added by agent list. The library does not show that list, an agent badge, or commit chips. Concept emoji is the `e` string older concepts use (`emoji` is accepted as the same value); a missing emoji leaves the slot empty.
 
@@ -47,9 +55,18 @@ python -m http.server 8791
 
 (The app fetches JSON, so it needs HTTP — opening `index.html` directly as a file won't work.)
 
-To exercise the Wiki Insights cross-links locally, serve the parent folder holding both
-app directories instead, then open `http://localhost:8790/wiki-flashcards/`. On localhost
-the app points at `../wiki-insights/`; everywhere else it uses the public URL.
+Insights links are `insights/`, resolved relative to `/wiki-flashcards/`. Serve a parent
+folder with this repo checked out as `wiki-flashcards`, then open
+`http://localhost:8790/wiki-flashcards/`.
+
+## Source
+
+Second Brain was not reachable for this change, so no source copy and no
+`scripts/sync_wiki_flashcards.py` update landed. If a wiki-flashcards source still
+exists, port these Pages files before the next sync: `index.html`, `app.js`,
+`styles.css`, `suite.css`, `README.md`. If the sync copies an allowlist, add
+`suite.css` and copy `insights/` recursively. If it mirrors the tree, keep
+`insights/` (exclude it from deletion, or add the folder to the source).
 
 ## Tests
 

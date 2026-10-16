@@ -16,10 +16,8 @@
     video: "Video · Wiki Review Cards",
   };
 
-  // Sibling app; relative when serving the repo root locally.
-  const INSIGHTS_URL = /^(localhost|127\.0\.0\.1)$/.test(location.hostname)
-    ? "../wiki-insights/"
-    : "https://dong-xuyong.github.io/wiki-insights/";
+  // Insights is a sub-folder of this app. Relative so it resolves on every host.
+  const INSIGHTS_URL = "insights/";
 
   let DATA = null; // { sections, videos, concepts }
   let bySlug = {};
@@ -289,7 +287,7 @@
   function captureInsightsReturn() {
     try {
       const ref = document.referrer || "";
-      if (/wiki-insights/i.test(ref)) sessionStorage.setItem("wiki-flashcards-return", ref);
+      if (/wiki-insights|\/wiki-flashcards\/insights\//i.test(ref)) sessionStorage.setItem("wiki-flashcards-return", ref);
     } catch (e) { /* private mode */ }
   }
 
@@ -456,6 +454,11 @@
       b.classList.toggle("active", on);
       if (on) b.setAttribute("aria-current", "page");
       else b.removeAttribute("aria-current");
+    });
+    const suiteCurrent = r.name === "aws" ? "aws" : "cards";
+    document.querySelectorAll(".suite-nav a").forEach((a) => {
+      if (a.dataset.suite === suiteCurrent) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
     });
     if (r.name === "concept") return renderDetail(r.slug);
     if (r.name === "video") return renderVideo(r.slug);

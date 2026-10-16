@@ -1,0 +1,8 @@
+.suite-nav { display: flex; gap: 4px; margin: 8px 12px 0; padding: 4px; border-radius: 999px;
+  background: hsl(var(--card)); border: 1px solid hsl(var(--border) / 0.8); max-width: 560px; }
+@media (min-width: 600px) { .suite-nav { margin: 8px auto 0; } }
+.suite-nav a { flex: 1 1 0; display: flex; align-items: center; justify-content: center; min-height: 44px;
+  padding: 0 8px; border-radius: 999px; font: 600 0.9rem/1.1 "Encode Sans", system-ui, sans-serif;
+  color: var(--muted-text); text-decoration: none; white-space: nowrap; }
+.suite-nav a[aria-current="page"] { background: hsl(var(--primary) / 0.12); color: hsl(var(--primary)); }
+.suite-nav a:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; }

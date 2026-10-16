@@ -4,13 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#f6f4ef" />
-  <title>Wiki Review Cards</title>
+  <title>Study · Wiki Review Cards</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Encode+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script src="dong-ui/theme.js"></script>
   <link rel="stylesheet" href="dong-ui/theme.css?v=6" />
-  <link rel="stylesheet" href="styles.css?v=9" />
+  <link rel="stylesheet" href="styles.css?v=10" />
+  <link rel="stylesheet" href="suite.css?v=1" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>" />
 </head>
 <body>
@@ -26,6 +27,11 @@
       <a class="dong-home-link" href="https://dong-xuyong.github.io/" aria-label="Back to all apps" title="All apps"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"/></svg></a>
       <button type="button" data-dong-theme-toggle aria-label="Toggle color theme"></button>
     </header>
+    <nav class="suite-nav" aria-label="Study sections">
+      <a href="/wiki-flashcards/#/" data-suite="cards">Cards</a>
+      <a href="/wiki-flashcards/#/aws" data-suite="aws">AWS</a>
+      <a href="/wiki-flashcards/insights/" data-suite="insights">Insights</a>
+    </nav>
     <div id="connect" hidden>
       <button type="button" id="btn-connect">Connect GitHub to sync</button>
     </div>
@@ -54,16 +60,12 @@
         <span class="tab-icon nav-icon" aria-hidden="true">&#9636;</span>
         <span>Progress</span>
       </button>
-      <button type="button" data-tab="aws" class="tab nav-tab">
-        <span class="tab-icon nav-icon" aria-hidden="true">&#9729;</span>
-        <span>AWS</span>
-      </button>
     </nav>
   </div>
   <script src="dong-ui/gh-sync.js?v=4"></script>
   <script src="agent-feed.js?v=2"></script>
   <script src="analytics.js?v=8"></script>
   <script src="aws-study.js?v=1"></script>
-  <script src="app.js?v=14"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>
