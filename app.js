@@ -23,6 +23,10 @@
   let bySlug = {};
   let session = null; // { queue, idx, flipped, hint, total, sectionId, videoSlug, done, goal, grades }
   let sessionPaused = false;
+  let studyFocusExit = true;
+  let immersiveLock = false;
+  let undoTimer = null;
+  let undoState = null;
   let store = load();
   let pendingDepth = null; // history depth to stamp on the entry go() is creating
   let detailReveal = { slug: null, on: false };
@@ -62,7 +66,7 @@
   }
 
   function load() {
-    let data = { cards: {}, streak: { last: null, count: 0 }, libOpen: {} };
+    let data = { cards: {}, streak: { last: null, count: 0 }, libOpen: {}, retired: [] };
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) {
@@ -70,6 +74,7 @@
         if (parsed && typeof parsed === "object") Object.assign(data, parsed);
       }
     } catch (e) { /* corrupted store -> start fresh */ }
+    data.retired = normalizeRetired(data.retired);
     session = hydrateSession(data.session);
     sessionPaused = !!session;
     return data;
@@ -106,10 +111,13 @@
   // ---------- card state helpers ----------
   const isKnown = (s) => (store.cards[s] || {}).st === "known";
   const isUnknown = (s) => (store.cards[s] || {}).st === "unknown";
-  const isNew = (s) => !store.cards[s] || (store.cards[s].reps === 0 && !store.cards[s].st);
+  const isNew = (s) => {
+    if (isRetired(s)) return false;
+    return !store.cards[s] || (store.cards[s].reps === 0 && !store.cards[s].st);
+  };
   const isDue = (s) => {
     const c = store.cards[s];
-    if (!c || isKnown(s)) return false;
+    if (!c || isKnown(s) || isRetired(s)) return false;
     return (c.reps > 0 || c.st === "unknown") && c.due <= Date.now();
   };
 
@@ -125,6 +133,46 @@
     c.st = null;
     c.last = Date.now();
     save();
+  }
+
+  /** Retired ids sync inside wiki-flashcards.json. Newer `t` wins; `on: false` is an unhide. */
+  function normalizeRetired(raw) {
+    const map = new Map();
+    const list = Array.isArray(raw) ? raw : [];
+    list.forEach((item) => {
+      let rec = null;
+      if (typeof item === "string" && item) rec = { id: item, t: 0, on: true };
+      else if (item && typeof item === "object" && item.id) {
+        rec = { id: String(item.id), t: Number(item.t) || 0, on: item.on !== false };
+      }
+      if (!rec || !rec.id) return;
+      const prev = map.get(rec.id);
+      if (!prev || rec.t >= prev.t) map.set(rec.id, rec);
+    });
+    return [...map.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+  function mergeRetired(a, b) {
+    return normalizeRetired([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])]);
+  }
+  function isRetired(slug) {
+    return normalizeRetired(store.retired).some((rec) => rec.on && rec.id === slug);
+  }
+  function isLibraryKnown(slug) {
+    return isRetired(slug) || isKnown(slug);
+  }
+  function retireSlug(slug) {
+    const next = normalizeRetired(store.retired).filter((rec) => rec.id !== slug);
+    next.push({ id: slug, t: Date.now(), on: true });
+    store.retired = normalizeRetired(next);
+    markKnown(slug);
+  }
+  function unhideSlug(slug) {
+    const wasRetired = isRetired(slug);
+    const next = normalizeRetired(store.retired).filter((rec) => rec.id !== slug);
+    if (wasRetired) next.push({ id: slug, t: Date.now(), on: false });
+    store.retired = normalizeRetired(next);
+    if ((store.cards[slug] || {}).st === "known") clearMark(slug);
+    else save();
   }
 
   function clamp(n, lo, hi) {
@@ -217,7 +265,7 @@
   }
 
   function buildQueue(opts) {
-    const pool = poolFor(opts);
+    const pool = poolFor(opts).filter((c) => !isRetired(c.slug));
     if (opts && opts.all) {
       const every = pool.map((c) => c.slug);
       shuffle(every);
@@ -245,9 +293,9 @@
     const pool = poolFor(typeof scope === "string" || !scope ? { sectionId: scope } : scope);
     let due = 0, known = 0, unknown = 0, fresh = 0;
     for (const c of pool) {
-      if (isKnown(c.slug)) known++;
+      if (isLibraryKnown(c.slug)) known++;
       else if (isDue(c.slug)) due++;
-      if (isUnknown(c.slug)) unknown++;
+      if (isUnknown(c.slug) && !isRetired(c.slug)) unknown++;
       if (isNew(c.slug)) fresh++;
     }
     return { total: pool.length, due, known, unknown, fresh };
@@ -371,12 +419,14 @@
   function resumeOrStart() {
     if (sessionLeft() > 0) {
       sessionPaused = false;
+      studyFocusExit = false;
       window.WikiAnalytics?.record({
         type: "session_resume",
         sectionId: session.sectionId,
         videoSlug: session.videoSlug,
       });
       saveSession();
+      requestStudyFullscreen();
       go("#/study");
       return;
     }
@@ -384,6 +434,10 @@
   }
 
   function maybePauseSession(routeName) {
+    if (routeName !== "study") {
+      studyFocusExit = true;
+      closeStudyFocus();
+    }
     if (routeName === "study") return;
     if (session && session.idx < session.queue.length && !sessionPaused) {
       sessionPaused = true;
@@ -537,6 +591,7 @@
     return JSON.stringify({
       cards: store.cards,
       analytics: window.WikiAnalytics?.load?.() || null,
+      retired: normalizeRetired(store.retired),
     });
   }
   function failSync(err) {
@@ -664,6 +719,7 @@
       exportedAt: new Date().toISOString(),
       cards: store.cards,
       analytics: window.WikiAnalytics?.load?.() || null,
+      retired: normalizeRetired(store.retired),
     };
   }
   function applyProgress(data) {
@@ -672,11 +728,16 @@
     }
     const preKey = `${STORE_KEY}-pre-import`;
     if (localStorage.getItem(preKey) == null) {
-      localStorage.setItem(preKey, JSON.stringify({ cards: store.cards, analytics: window.WikiAnalytics?.load?.() }));
+      localStorage.setItem(preKey, JSON.stringify({
+        cards: store.cards,
+        analytics: window.WikiAnalytics?.load?.(),
+        retired: normalizeRetired(store.retired),
+      }));
     }
     applyingRemote = true;
     try {
       store.cards = WikiAnalytics.mergeCards(store.cards, data.cards);
+      if (data.retired != null) store.retired = mergeRetired(store.retired, data.retired);
       save();
       if (data.analytics) WikiAnalytics.mergeFrom(data.analytics);
     } finally {
@@ -894,7 +955,7 @@
   }
 
   function conceptMatches(c) {
-    if (libFilter === "known" && !isKnown(c.slug)) return false;
+    if (libFilter === "known" && !isLibraryKnown(c.slug)) return false;
     if (libFilter === "unknown" && !isUnknown(c.slug)) return false;
     if (libFilter === "due" && !isDue(c.slug)) return false;
     if (libFilter === "new" && !isNew(c.slug)) return false;
@@ -924,7 +985,7 @@
 
   function conceptRow(c) {
     let badge = "";
-    if (isKnown(c.slug)) badge = `<span class="badge known">Known</span>`;
+    if (isLibraryKnown(c.slug)) badge = `<span class="badge known">Known</span>`;
     else if (isUnknown(c.slug)) badge = `<span class="badge unknown">Unknown</span>`;
     else if (isDue(c.slug)) badge = `<span class="badge due">Due</span>`;
     const kws = (c.keywords || []).slice(0, 4).map((k) => `<span class="kw">${esc(k)}</span>`).join("");
@@ -934,12 +995,18 @@
     const authorLine = uniqAuthors.length
       ? `<span class="row-author">${esc(uniqAuthors.join(" · "))}</span>`
       : "";
-    return `
-      <button type="button" class="concept-row dx-card" data-slug="${c.slug}">
+    const body = `
         <span class="t">${emoji}<span>${esc(c.title)}</span>${badge}</span>
         ${authorLine}
-        ${kws ? `<span class="kw-row">${kws}</span>` : ""}
-      </button>`;
+        ${kws ? `<span class="kw-row">${kws}</span>` : ""}`;
+    if (!isLibraryKnown(c.slug)) {
+      return `<button type="button" class="concept-row dx-card" data-slug="${esc(c.slug)}">${body}</button>`;
+    }
+    return `
+      <div class="concept-row dx-card is-known-row" data-slug="${esc(c.slug)}">
+        <button type="button" class="concept-open" data-slug="${esc(c.slug)}">${body}</button>
+        <button type="button" class="unhide-btn" data-slug="${esc(c.slug)}">Unhide</button>
+      </div>`;
   }
 
   function renderLibList() {
@@ -988,8 +1055,16 @@
   }
 
   function bindConceptRows(scope) {
-    scope.querySelectorAll(".concept-row").forEach((r) => {
+    scope.querySelectorAll("button.concept-row, .concept-open").forEach((r) => {
       r.onclick = () => go(`#/c/${encodeURIComponent(r.dataset.slug)}`);
+    });
+    scope.querySelectorAll(".unhide-btn").forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        unhideSlug(btn.dataset.slug);
+        if (parseRoute().name === "library") renderLibrary();
+        else render();
+      };
     });
   }
 
@@ -1002,7 +1077,7 @@
       detailReveal = { slug, on: false };
     }
     const revealed = detailReveal.on;
-    const known = isKnown(slug);
+    const known = isLibraryKnown(slug);
     const emoji = emojiTag(c, "span", "detail-emoji");
     root.innerHTML = `
       <div class="detail-title">${emoji}${esc(c.title)}
@@ -1017,7 +1092,7 @@
       ${c.definition ? `<div class="detail-def">${esc(c.definition)}</div>` : ""}
       ${(c.videos && c.videos.length) ? `<h2 class="head">From these videos</h2>${videoRowsHtml(c.videos, false)}` : ""}
       ${revealed ? `<button type="button" class="toggle-known-btn ${known ? "is-known" : ""}" id="toggle-known">
-        ${known ? "&#10003; Marked as known — tap to unmark" : "Mark as known"}
+        ${known ? "Unhide" : "Mark as known"}
       </button>` : ""}
       ${c.related.length ? `<h2 class="head">Related concepts</h2>
         <div class="related-list">
@@ -1030,7 +1105,11 @@
     };
     const toggle = root.querySelector("#toggle-known");
     if (toggle) toggle.onclick = () => {
-      known ? clearMark(slug) : markKnown(slug);
+      if (known) unhideSlug(slug);
+      else {
+        retireSlug(slug);
+        showKnownUndo(slug, null);
+      }
       render();
     };
     root.querySelectorAll(".related-link").forEach((b) => {
@@ -1093,10 +1172,170 @@
   }
 
   // ----- study -----
+  function requestStudyFullscreen() {
+    const el = document.documentElement;
+    if (!el || typeof el.requestFullscreen !== "function") return;
+    try {
+      const pending = el.requestFullscreen();
+      if (pending && typeof pending.catch === "function") pending.catch(() => {});
+    } catch (e) { /* iOS Safari rejects or omits fullscreen on the document */ }
+  }
+  function exitStudyFullscreen() {
+    if (!document.fullscreenElement || typeof document.exitFullscreen !== "function") return;
+    try {
+      const pending = document.exitFullscreen();
+      if (pending && typeof pending.catch === "function") pending.catch(() => {});
+    } catch (e) { /* already left */ }
+  }
+  function syncExitButton() {
+    const btn = document.getElementById("study-exit");
+    if (!btn) return;
+    const on = document.body.classList.contains("study-focus");
+    btn.hidden = !on;
+    btn.setAttribute("aria-hidden", on ? "false" : "true");
+  }
+  function closeStudyFocus() {
+    document.body.classList.remove("study-focus");
+    syncExitButton();
+    exitStudyFullscreen();
+  }
+  function openStudyFocus() {
+    document.body.classList.add("study-focus");
+    syncExitButton();
+  }
+  function leaveImmersive() {
+    if (immersiveLock) return;
+    immersiveLock = true;
+    try {
+      studyFocusExit = true;
+      if (session && session.idx < session.queue.length) {
+        const wasActive = !sessionPaused;
+        sessionPaused = true;
+        saveSession();
+        if (wasActive) {
+          window.WikiAnalytics?.record({
+            type: "session_pause",
+            sectionId: session.sectionId,
+            videoSlug: session.videoSlug,
+          });
+        }
+      }
+      closeStudyFocus();
+      if (DATA && parseRoute().name === "study") render();
+    } finally {
+      immersiveLock = false;
+    }
+  }
+  function hideUndoToast() {
+    clearTimeout(undoTimer);
+    undoTimer = null;
+    undoState = null;
+    document.querySelectorAll(".undo-toast").forEach((node) => node.remove());
+  }
+  function showKnownUndo(slug, restore) {
+    hideUndoToast();
+    const el = document.createElement("div");
+    el.className = "undo-toast";
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "polite");
+    const text = document.createElement("span");
+    text.textContent = "Marked Known";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Undo";
+    el.append(text, btn);
+    document.body.appendChild(el);
+    undoState = { slug, restore: restore || null };
+    btn.addEventListener("click", () => {
+      const state = undoState;
+      hideUndoToast();
+      if (!state) return;
+      unhideSlug(state.slug);
+      if (state.restore && session) {
+        const at = Math.max(0, Math.min(state.restore.idx, session.queue.length));
+        if (!session.queue.includes(state.slug)) session.queue.splice(at, 0, state.slug);
+        session.total = session.queue.length;
+        session.idx = Math.max(0, session.queue.indexOf(state.slug));
+        session.flipped = !!state.restore.flipped;
+        sessionPaused = false;
+        studyFocusExit = false;
+        requestStudyFullscreen();
+        saveSession();
+      }
+      if (DATA) render();
+    });
+    undoTimer = setTimeout(hideUndoToast, 4500);
+  }
+  function foldSection(id, label, body) {
+    if (!body) return "";
+    return `<section class="card-fold">
+      <button type="button" class="card-fold-btn" aria-expanded="false" aria-controls="${id}">
+        <span>${esc(label)}</span><span class="card-fold-chev" aria-hidden="true">&#8250;</span>
+      </button>
+      <div class="card-fold-panel" id="${id}" hidden>${body}</div>
+    </section>`;
+  }
+  function cardFolds(c, opts) {
+    const parts = [];
+    if (opts.insight && c.x) {
+      parts.push(foldSection("fold-insight", "Insight", `<div class="x-text">${rich(c.x)}</div>`));
+    }
+    if (opts.tags && c.keywords && c.keywords.length) {
+      const chips = c.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("");
+      parts.push(foldSection("fold-tags", "Tags", `<div class="kw-row">${chips}</div>`));
+    }
+    if (opts.videos) {
+      const videos = videoRowsHtml(opts.videos === "all" ? (c.videos || []) : (c.videos || []).slice(0, 2), true);
+      if (videos) parts.push(foldSection("fold-videos", "Source videos", videos));
+    }
+    return parts.join("");
+  }
+  function bindFolds(scope) {
+    scope.querySelectorAll(".card-fold-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const panel = document.getElementById(btn.getAttribute("aria-controls"));
+        const open = btn.getAttribute("aria-expanded") !== "true";
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+        if (panel) panel.hidden = !open;
+      });
+    });
+  }
+  function skipRetiredInSession() {
+    if (!session) return;
+    let changed = false;
+    while (session.idx < session.queue.length && isRetired(session.queue[session.idx])) {
+      session.queue.splice(session.idx, 1);
+      changed = true;
+    }
+    if (changed) {
+      session.total = session.queue.length;
+      saveSession();
+    }
+  }
+  function retireCurrentCard() {
+    if (!session || session.idx >= session.queue.length) return;
+    const slug = session.queue[session.idx];
+    const restore = { idx: session.idx, flipped: true };
+    retireSlug(slug);
+    const before = session.queue.slice(0, session.idx);
+    const after = session.queue.slice(session.idx + 1).filter((id) => id !== slug);
+    session.queue = before.concat(after);
+    session.total = session.queue.length;
+    session.flipped = false;
+    session.hint = false;
+    saveSession();
+    setStudyStatus("Known — card hidden");
+    showKnownUndo(slug, restore);
+    render();
+  }
+
   function startSession(opts) {
     const scope = typeof opts === "string" || !opts ? { sectionId: opts || null } : opts;
     const queue = buildQueue(scope);
     sessionPaused = false;
+    studyFocusExit = queue.length === 0;
+    if (queue.length) requestStudyFullscreen();
     session = {
       queue,
       idx: 0,
@@ -1153,15 +1392,14 @@
   }
 
   function renderStudy() {
-    if (!session || session.idx >= session.queue.length) return renderStudyEntryOrDone();
-    if (sessionPaused) {
-      sessionPaused = false;
-      window.WikiAnalytics?.record({
-        type: "session_resume",
-        sectionId: session.sectionId,
-        videoSlug: session.videoSlug,
-      });
-      saveSession();
+    if (!session || session.idx >= session.queue.length || studyFocusExit || sessionPaused) {
+      closeStudyFocus();
+      return renderStudyEntryOrDone();
+    }
+    skipRetiredInSession();
+    if (!session || session.idx >= session.queue.length) {
+      closeStudyFocus();
+      return renderStudyEntryOrDone();
     }
     const slug = session.queue[session.idx];
     const c = bySlug[slug];
@@ -1169,35 +1407,31 @@
       advance();
       return;
     }
+    openStudyFocus();
     const sec = sectionOf(c.section);
     setChrome(studyScopeTitle(), studyChromeMeta(session.goal), false);
+    const reveal = () => {
+      session.flipped = true;
+      saveSession();
+      setStudyStatus("Answer revealed");
+      render();
+    };
 
     if (!session.flipped) {
       root.innerHTML = `
         <div id="study-wrap">
           ${studyProgressHtml()}
-          <button type="button" class="flashcard dx-card" id="card" aria-label="Reveal answer">
-            <div class="side-label" style="color:${sec.color}">Question &middot; ${esc(sectionLabel(c.section))}</div>
-            ${emojiTag(c, "div", "card-emoji")}
-            <div class="q-text">${rich(c.q)}</div>
-            <div class="tap-hint">Tap card to reveal answer</div>
-          </button>
-          ${session.hint
-            ? `<div class="kw-row" style="margin-top:14px">${c.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>`
-            : `<button type="button" class="hint-btn" id="hint-btn">Show keywords hint</button>`}
+          <div class="flashcard dx-card" id="card">
+            <button type="button" class="card-face" id="card-face" aria-label="Reveal answer">
+              <div class="side-label" style="color:${sec.color}">Question &middot; ${esc(sectionLabel(c.section))}</div>
+              ${emojiTag(c, "div", "card-emoji")}
+              <div class="q-text">${rich(c.q)}</div>
+              <div class="tap-hint">Tap card to reveal answer</div>
+            </button>
+            ${cardFolds(c, { tags: true, videos: "all" })}
+          </div>
         </div>`;
-      root.querySelector("#card").onclick = () => {
-        session.flipped = true;
-        saveSession();
-        setStudyStatus("Answer revealed");
-        render();
-      };
-      const hb = root.querySelector("#hint-btn");
-      if (hb) hb.onclick = () => {
-        session.hint = true;
-        saveSession();
-        render();
-      };
+      root.querySelector("#card-face").onclick = reveal;
     } else {
       const hardL = previewInterval(slug, 1);
       const goodL = previewInterval(slug, 2);
@@ -1205,26 +1439,30 @@
       root.innerHTML = `
         <div id="study-wrap">
           ${studyProgressHtml()}
-          <div class="flashcard dx-card">
-            <div class="side-label" style="color:${sec.color}">Answer</div>
+          <div class="flashcard dx-card" id="card">
+            <div class="side-label" style="color:${sec.color}">Question</div>
             ${emojiTag(c, "div", "card-emoji small")}
+            <div class="q-text q-compact">${rich(c.q)}</div>
+            <div class="side-label">Answer</div>
             <div class="a-text">${rich(c.a)}</div>
-            ${c.x ? `<div class="x-text"><span class="x-label">Example</span>${rich(c.x)}</div>` : ""}
             <div class="concept-name">${esc(c.title)}</div>
-            ${c.keywords.length ? `<div class="kw-row" style="margin-top:10px">${c.keywords.slice(0, 5).map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}
-            ${videoRowsHtml((c.videos || []).slice(0, 2), true)}
+            ${cardFolds(c, { insight: true, tags: true, videos: "all" })}
           </div>
           <div class="grade-row">
             <button type="button" class="grade-btn grade-again" data-g="0" aria-label="Again, repeat now">Again<small>now</small></button>
             <button type="button" class="grade-btn grade-hard" data-g="1" aria-label="Hard, ${hardL}">Hard<small>${hardL}</small></button>
             <button type="button" class="grade-btn grade-good" data-g="2" aria-label="Good, ${goodL}">Good<small>${goodL}</small></button>
             <button type="button" class="grade-btn grade-easy" data-g="3" aria-label="Easy, ${easyL}">Easy<small>${easyL}</small></button>
+            <button type="button" class="known-btn" id="mark-known-btn" aria-label="Known, retire this card">Known<small>hide</small></button>
           </div>
         </div>`;
       root.querySelectorAll(".grade-btn").forEach((b) => {
         b.onclick = () => applySessionGrade(Number(b.dataset.g));
       });
+      const knownBtn = root.querySelector("#mark-known-btn");
+      if (knownBtn) knownBtn.onclick = retireCurrentCard;
     }
+    bindFolds(root);
   }
 
   function applySessionGrade(g) {
@@ -1341,11 +1579,32 @@
   // ---------- boot ----------
   captureInsightsReturn();
   backBtn.onclick = goBack;
+  const studyExitBtn = document.getElementById("study-exit");
+  if (studyExitBtn) studyExitBtn.onclick = leaveImmersive;
   tabs.forEach((b) => (b.onclick = () => {
+    if (b.dataset.tab === "study" && sessionLeft() > 0) {
+      const wasPaused = sessionPaused || studyFocusExit;
+      studyFocusExit = false;
+      sessionPaused = false;
+      if (wasPaused) {
+        window.WikiAnalytics?.record({
+          type: "session_resume",
+          sectionId: session.sectionId,
+          videoSlug: session.videoSlug,
+        });
+      }
+      requestStudyFullscreen();
+      saveSession();
+    }
     go(TAB_ROUTES[b.dataset.tab]);
   }));
   window.addEventListener("keydown", (e) => {
-    if (!session || !session.flipped) return;
+    if (e.key === "Escape" && (document.body.classList.contains("study-focus") || document.fullscreenElement)) {
+      e.preventDefault();
+      leaveImmersive();
+      return;
+    }
+    if (!session || !session.flipped || studyFocusExit || sessionPaused) return;
     const t = e.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
     const n = Number(e.key);
@@ -1353,6 +1612,9 @@
       e.preventDefault();
       applySessionGrade(n - 1);
     }
+  });
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && document.body.classList.contains("study-focus")) leaveImmersive();
   });
   window.addEventListener("hashchange", () => {
     if (pendingDepth !== null) {
