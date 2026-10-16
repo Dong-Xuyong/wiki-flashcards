@@ -1,0 +1,22 @@
+{
+  "app": "aws-study",
+  "schemaVersion": 1,
+  "owner": "rayleigh",
+  "updatedAt": null,
+  "exam": {
+    "code": "CLF-C02",
+    "date": null,
+    "time": null,
+    "booked": false,
+    "passScore": 700,
+    "updatedAt": null
+  },
+  "domains": [
+    { "id": "d1", "name": "Cloud Concepts", "weight": 24 },
+    { "id": "d2", "name": "Security and Compliance", "weight": 30 },
+    { "id": "d3", "name": "Cloud Technology and Services", "weight": 34 },
+    { "id": "d4", "name": "Billing, Pricing, and Support", "weight": 12 }
+  ],
+  "topics": [],
+  "practiceTests": []
+}
