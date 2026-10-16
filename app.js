@@ -24,9 +24,18 @@
   let session = null; // { queue, idx, flipped, hint, total, sectionId, videoSlug, done, goal, grades }
   let sessionPaused = false;
   let studyFocusExit = true;
-  let immersiveLock = false;
   let undoTimer = null;
   let undoState = null;
+  const PLACE_KEY = "wiki-study-place-v1";
+  let resumeLock = 0;
+  let blockClick = false;
+  let swipePointer = null;
+  let browserFullscreen = false;
+  let practiceFocus = false;
+  let pendingCombo = null;
+  let placeClear = false;
+  const bootHash = location.hash || "";
+  const reduceQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
   let store = load();
   let pendingDepth = null; // history depth to stamp on the entry go() is creating
   let detailReveal = { slug: null, on: false };
@@ -98,6 +107,7 @@
       grades: session.grades || emptyGrades(),
     };
     save();
+    savePlace();
   }
   function clearStoredSession() {
     delete store.session;
@@ -400,12 +410,16 @@
 
   function primaryStudyBtn(id, queued) {
     const left = sessionLeft();
-    if (left > 0) {
+    if (left > 0 && goalRoom() > 0) {
       return `<button type="button" class="primary-action" id="${id}">
-        <span><small>Continue</small><strong>Resume ${left} left</strong></span>
+        <span><small>Continue</small><strong>Resume ${Math.min(left, goalRoom())} left</strong></span>
         <span class="primary-arrow" aria-hidden="true">→</span>
       </button>`;
     }
+    return startStudyBtn(id, queued);
+  }
+
+  function startStudyBtn(id, queued) {
     const goal = dailyGoal(null);
     return `<button type="button" class="primary-action" id="${id}" ${queued === 0 ? "disabled" : ""}>
       <span>
@@ -417,16 +431,19 @@
   }
 
   function resumeOrStart() {
-    if (sessionLeft() > 0) {
+    if (sessionLeft() > 0 && capSessionToGoal()) {
+      const wasPaused = sessionPaused || studyFocusExit;
       sessionPaused = false;
       studyFocusExit = false;
-      window.WikiAnalytics?.record({
-        type: "session_resume",
-        sectionId: session.sectionId,
-        videoSlug: session.videoSlug,
-      });
+      if (wasPaused) {
+        window.WikiAnalytics?.record({
+          type: "session_resume",
+          sectionId: session.sectionId,
+          videoSlug: session.videoSlug,
+        });
+      }
+      enterPracticeFocus();
       saveSession();
-      requestStudyFullscreen();
       go("#/study");
       return;
     }
@@ -514,17 +531,16 @@
       if (a.dataset.suite === suiteCurrent) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     });
-    if (r.name === "concept") return renderDetail(r.slug);
-    if (r.name === "video") return renderVideo(r.slug);
-    if (r.name === "library") return renderLibrary();
-    if (r.name === "study") return renderStudy();
-    if (r.name === "analytics") return renderAnalytics();
-    if (r.name === "aws") {
-      if (window.AwsStudy && typeof window.AwsStudy.render === "function") return window.AwsStudy.render(root);
-      root.textContent = "AWS study failed to load.";
-      return;
-    }
-    return renderHome();
+    if (r.name === "concept") renderDetail(r.slug);
+    else if (r.name === "video") renderVideo(r.slug);
+    else if (r.name === "library") renderLibrary();
+    else if (r.name === "study") renderStudy();
+    else if (r.name === "analytics") renderAnalytics();
+    else if (r.name === "aws") {
+      if (window.AwsStudy && typeof window.AwsStudy.render === "function") window.AwsStudy.render(root);
+      else root.textContent = "AWS study failed to load.";
+    } else renderHome();
+    if (!resumeLock) savePlace();
   }
 
   function renderAnalytics() {
@@ -600,7 +616,7 @@
   }
   function refreshIfProgressChanged(before) {
     if (!DATA || progressSnapshot() === before) return;
-    if (document.querySelector("#study-wrap, .done-panel")) return;
+    if (document.querySelector("#study-session, .done-panel")) return;
     const active = document.activeElement;
     if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
     render();
@@ -608,7 +624,7 @@
   function refreshAgentView() {
     if (!DATA || !agentViewDirty) return;
     agentViewDirty = false;
-    if (document.querySelector("#study-wrap, .done-panel")) return;
+    if (document.querySelector("#study-session, .done-panel")) return;
     const active = document.activeElement;
     if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
     render();
@@ -947,9 +963,9 @@
       </div>
       <div id="lib-list"></div>`;
     const box = root.querySelector("#search-box");
-    box.oninput = () => { libSearch = box.value; renderLibList(); };
+    box.oninput = () => { libSearch = box.value; renderLibList(); savePlace(); };
     root.querySelectorAll(".filter-chip").forEach((b) => {
-      b.onclick = () => { libFilter = b.dataset.f; renderLibrary(); };
+      b.onclick = () => { libFilter = b.dataset.f; savePlace(); renderLibrary(); };
     });
     renderLibList();
   }
@@ -1172,59 +1188,288 @@
   }
 
   // ----- study -----
+  function reduceMotion() {
+    return !!(reduceQuery && reduceQuery.matches);
+  }
+  function localDay(t) {
+    const d = new Date(t);
+    if (Number.isNaN(d.getTime())) return "";
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  function loadPlace() {
+    try {
+      const data = JSON.parse(localStorage.getItem(PLACE_KEY) || "null");
+      return data && typeof data === "object" ? data : {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function snapshotPlace() {
+    const prev = loadPlace();
+    const routeName = DATA ? parseRoute().name : "home";
+    const tab = TAB_FOR[routeName] || prev.tab || "home";
+    const data = {
+      v: 1,
+      tab,
+      search: libSearch,
+      libFilter: libFilter || "all",
+      deck: prev.deck || "",
+      deckKind: prev.deckKind || "",
+      index: Number(prev.index) || 0,
+      cardId: prev.cardId || "",
+      queueIds: Array.isArray(prev.queueIds) ? prev.queueIds.slice() : [],
+      flipped: !!prev.flipped,
+      active: !!prev.active,
+      done: Number(prev.done) || 0,
+      grades: prev.grades || emptyGrades(),
+      goal: Number(prev.goal) || 0,
+      combo: pendingCombo ? pendingCombo.combo : (Number(prev.combo) || 0),
+      comboAt: pendingCombo ? pendingCombo.comboAt : (Number(prev.comboAt) || 0),
+    };
+    if (session && session.queue && session.queue.length && session.idx < session.queue.length) {
+      data.index = session.idx || 0;
+      data.flipped = !!session.flipped;
+      data.queueIds = session.queue.slice();
+      data.cardId = session.queue[session.idx] || "";
+      data.done = Number(session.done) || 0;
+      data.grades = session.grades || emptyGrades();
+      data.goal = Number(session.goal) || 0;
+      data.active = true;
+      if (session.videoSlug) {
+        data.deck = session.videoSlug;
+        data.deckKind = "video";
+      } else if (session.sectionId) {
+        data.deck = session.sectionId;
+        data.deckKind = "section";
+      } else {
+        data.deck = "";
+        data.deckKind = "";
+      }
+    } else if (session || placeClear) {
+      data.active = false;
+      data.queueIds = [];
+      data.cardId = "";
+      data.index = 0;
+      data.flipped = false;
+      data.deck = "";
+      data.deckKind = "";
+      data.done = 0;
+      placeClear = false;
+    }
+    return data;
+  }
+  function savePlace() {
+    if (resumeLock || !DATA) return;
+    try { localStorage.setItem(PLACE_KEY, JSON.stringify(snapshotPlace())); }
+    catch (e) { /* private mode */ }
+  }
+  function goalRoom() {
+    const goal = dailyGoal(null);
+    const reviewed = todayReviews();
+    if (typeof reviewed !== "number" || !isFinite(reviewed) || reviewed < 0) return goal > 0 ? goal : 0;
+    return Math.max(0, goal - reviewed);
+  }
+  function capSessionToGoal() {
+    if (!session || !session.queue || session.idx >= session.queue.length) return false;
+    const room = goalRoom();
+    if (room <= 0) return false;
+    if (session.queue.length - session.idx > room) {
+      session.queue = session.queue.slice(0, session.idx + room);
+      session.total = session.queue.length;
+    }
+    return true;
+  }
+  function sessionFromPlace(data, room) {
+    if (!data || !Array.isArray(data.queueIds) || !data.queueIds.length) return null;
+    if (!(room > 0)) return null;
+    const queue = [];
+    data.queueIds.forEach((id) => {
+      if (bySlug[id] && !isRetired(id)) queue.push(id);
+    });
+    if (!queue.length) return null;
+    let idx = Number(data.index) || 0;
+    if (data.cardId) {
+      const at = queue.indexOf(data.cardId);
+      if (at >= 0) idx = at;
+    }
+    if (idx < 0) idx = 0;
+    if (idx >= queue.length) idx = queue.length - 1;
+    let nextQueue = queue;
+    if (nextQueue.length - idx > room) nextQueue = nextQueue.slice(0, idx + room);
+    if (!nextQueue.length || idx >= nextQueue.length) return null;
+    const g = data.grades || {};
+    const scope = data.deckKind === "section"
+      ? { sectionId: data.deck || null }
+      : data.deckKind === "video"
+        ? { videoSlug: data.deck || null }
+        : null;
+    return {
+      queue: nextQueue,
+      idx,
+      flipped: !!data.flipped,
+      hint: false,
+      total: nextQueue.length,
+      sectionId: data.deckKind === "section" ? (data.deck || null) : null,
+      videoSlug: data.deckKind === "video" ? (data.deck || null) : null,
+      done: Number(data.done) || 0,
+      goal: Number(data.goal) || dailyGoal(scope),
+      grades: {
+        again: Number(g.again) || 0,
+        hard: Number(g.hard) || 0,
+        good: Number(g.good) || 0,
+        easy: Number(g.easy) || 0,
+      },
+    };
+  }
+  function deckLabel(data) {
+    if (!data || !data.deck) return "All topics";
+    if (data.deckKind === "video") {
+      const v = videoOf(data.deck);
+      return v && v.title ? v.title : "Video";
+    }
+    if (data.deckKind === "section") return sectionLabel(data.deck);
+    return "All topics";
+  }
+  function continueHtml() {
+    const data = loadPlace();
+    const room = goalRoom();
+    const viable = sessionFromPlace(data, room);
+    const busy = !!(session && !sessionPaused && !studyFocusExit && session.idx < (session.queue || []).length);
+    const show = !!(viable && !busy);
+    const idx = viable ? viable.idx : (Number(data.index) || 0);
+    const total = viable ? viable.queue.length : ((data.queueIds && data.queueIds.length) || 0);
+    const where = `${deckLabel(data)} · card ${idx + 1}${total ? ` of ${total}` : ""}`;
+    return `<button type="button" id="ux-continue" class="ux-continue" ${show ? "" : "hidden"} aria-label="${esc(`Continue where I left off, ${where}`)}">
+      <span><small>${esc(where)}</small><strong>Continue where I left off</strong></span>
+      <span class="ux-continue-go" aria-hidden="true">→</span>
+    </button>`;
+  }
+  function displayCombo() {
+    const combo = pendingCombo ? pendingCombo.combo : (Number(loadPlace().combo) || 0);
+    const at = pendingCombo ? pendingCombo.comboAt : loadPlace().comboAt;
+    if (combo < 1 || !at) return 0;
+    if (localDay(at) !== localDay(Date.now())) return 0;
+    return combo;
+  }
+  function noteCombo(g) {
+    const prev = loadPlace();
+    const now = Date.now();
+    const today = localDay(now);
+    const prevCombo = pendingCombo ? pendingCombo.combo : (Number(prev.combo) || 0);
+    const prevAt = pendingCombo ? pendingCombo.comboAt : prev.comboAt;
+    const continuing = prevAt && localDay(prevAt) === today && prevCombo > 0;
+    pendingCombo = {
+      combo: g === 0 ? 0 : (continuing ? prevCombo + 1 : 1),
+      comboAt: now,
+    };
+  }
+  function resumeSessionFromPlace() {
+    const room = goalRoom();
+    const next = sessionFromPlace(loadPlace(), room);
+    if (!next) return false;
+    resumeLock += 1;
+    try {
+      session = next;
+      sessionPaused = false;
+      studyFocusExit = false;
+    } finally {
+      resumeLock -= 1;
+    }
+    enterPracticeFocus();
+    saveSession();
+    return true;
+  }
+  function explicitBootHash() {
+    const hash = bootHash || "";
+    return !!hash && hash !== "#" && hash !== "#/";
+  }
+  function applyBootPlace() {
+    const data = loadPlace();
+    if (typeof data.search === "string") libSearch = data.search;
+    if (["all", "unknown", "known", "due", "new"].includes(data.libFilter)) libFilter = data.libFilter;
+    if (!explicitBootHash() && data.tab && data.tab !== "home" && TAB_ROUTES[data.tab]) {
+      history.replaceState(history.state || { d: 0 }, "", TAB_ROUTES[data.tab]);
+    }
+    if (parseRoute().name === "study" && data.active) resumeSessionFromPlace();
+  }
+  function fullscreenNode() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
   function requestStudyFullscreen() {
     const el = document.documentElement;
     if (!el || typeof el.requestFullscreen !== "function") return;
+    if (fullscreenNode()) return;
     try {
       const pending = el.requestFullscreen();
       if (pending && typeof pending.catch === "function") pending.catch(() => {});
     } catch (e) { /* iOS Safari rejects or omits fullscreen on the document */ }
   }
   function exitStudyFullscreen() {
-    if (!document.fullscreenElement || typeof document.exitFullscreen !== "function") return;
+    if (!fullscreenNode() || typeof document.exitFullscreen !== "function") return;
     try {
       const pending = document.exitFullscreen();
       if (pending && typeof pending.catch === "function") pending.catch(() => {});
     } catch (e) { /* already left */ }
   }
   function syncExitButton() {
-    const btn = document.getElementById("study-exit");
+    const btn = document.getElementById("practice-focus-exit");
     if (!btn) return;
-    const on = document.body.classList.contains("study-focus");
-    btn.hidden = !on;
-    btn.setAttribute("aria-hidden", on ? "false" : "true");
+    btn.hidden = !practiceFocus;
+    btn.setAttribute("aria-hidden", practiceFocus ? "false" : "true");
   }
   function closeStudyFocus() {
+    practiceFocus = false;
+    browserFullscreen = false;
+    document.documentElement.classList.remove("practice-focus");
     document.body.classList.remove("study-focus");
     syncExitButton();
     exitStudyFullscreen();
   }
-  function openStudyFocus() {
-    document.body.classList.add("study-focus");
-    syncExitButton();
+  function resetPracticeScroll() {
+    const nodes = [document.scrollingElement, document.documentElement, document.body, root, document.getElementById("app")];
+    nodes.forEach((node) => {
+      if (!node) return;
+      node.scrollTop = 0;
+      node.scrollLeft = 0;
+    });
+    try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
   }
-  function leaveImmersive() {
-    if (immersiveLock) return;
-    immersiveLock = true;
-    try {
-      studyFocusExit = true;
-      if (session && session.idx < session.queue.length) {
-        const wasActive = !sessionPaused;
-        sessionPaused = true;
-        saveSession();
-        if (wasActive) {
-          window.WikiAnalytics?.record({
-            type: "session_pause",
-            sectionId: session.sectionId,
-            videoSlug: session.videoSlug,
-          });
-        }
-      }
-      closeStudyFocus();
-      if (DATA && parseRoute().name === "study") render();
-    } finally {
-      immersiveLock = false;
+  function enterPracticeFocus() {
+    const already = practiceFocus;
+    practiceFocus = true;
+    document.documentElement.classList.add("practice-focus");
+    syncExitButton();
+    resetPracticeScroll();
+    if (!already) requestStudyFullscreen();
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => {
+        if (!practiceFocus) return;
+        resetPracticeScroll();
+        requestAnimationFrame(() => { if (practiceFocus) resetPracticeScroll(); });
+      });
     }
+  }
+  function exitPracticeFocus() {
+    const was = practiceFocus || document.documentElement.classList.contains("practice-focus");
+    practiceFocus = false;
+    browserFullscreen = false;
+    document.documentElement.classList.remove("practice-focus");
+    syncExitButton();
+    if (!was) return;
+    exitStudyFullscreen();
+  }
+  function onFullscreenChange() {
+    const active = fullscreenNode();
+    if (active) {
+      browserFullscreen = true;
+      if (practiceFocus) resetPracticeScroll();
+      return;
+    }
+    if (!browserFullscreen || !practiceFocus) return;
+    browserFullscreen = false;
+    practiceFocus = false;
+    document.documentElement.classList.remove("practice-focus");
+    syncExitButton();
   }
   function hideUndoToast() {
     clearTimeout(undoTimer);
@@ -1259,7 +1504,7 @@
         session.flipped = !!state.restore.flipped;
         sessionPaused = false;
         studyFocusExit = false;
-        requestStudyFullscreen();
+        enterPracticeFocus();
         saveSession();
       }
       if (DATA) render();
@@ -1335,7 +1580,7 @@
     const queue = buildQueue(scope);
     sessionPaused = false;
     studyFocusExit = queue.length === 0;
-    if (queue.length) requestStudyFullscreen();
+    if (queue.length) enterPracticeFocus();
     session = {
       queue,
       idx: 0,
@@ -1367,28 +1612,58 @@
   }
 
   function studyProgressHtml() {
-    const n = session.done + 1;
-    const pct = session.total ? Math.round((n / session.total) * 100) : 0;
-    return `<div id="study-progress">${n} / ${session.total}
-      ${completionBar(pct, `Card ${n} of ${session.total}`)}</div>`;
+    const goal = (session && session.goal) || dailyGoal(null);
+    const reviews = todayReviews();
+    const shown = Math.max(0, Number(reviews) || 0);
+    const pct = goal ? Math.min(100, Math.round((shown / goal) * 100)) : 0;
+    const combo = displayCombo();
+    const now = Math.min(shown, goal || shown);
+    return `<div class="study-progress-wrap dx-card">
+      <div class="practice-session-row">
+        <p id="study-progress" class="study-progress">${shown}/${goal}</p>
+        <span id="practice-combo" class="practice-combo" ${combo ? "" : "hidden"}>Combo ×${combo}</span>
+      </div>
+      <div class="study-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${goal}" aria-valuenow="${now}" aria-label="Today's reviews">
+        <div id="study-progress-fill" class="study-progress-fill" style="width:${pct}%"></div>
+      </div>
+    </div>`;
   }
 
-  function bindFlipCard(el) {
-    const flip = (e) => {
-      if (e.target.closest && (e.target.closest("#hint-btn") || e.target.closest("a"))) return;
-      session.flipped = true;
-      saveSession();
-      setStudyStatus("Answer revealed");
-      render();
-    };
-    el.onclick = flip;
-    el.onkeydown = (e) => {
-      if (e.target !== el) return;
-      if (e.key === " " || e.key === "Enter") {
-        e.preventDefault();
-        flip(e);
-      }
-    };
+  function studyCardOpen() {
+    return !!(
+      session &&
+      !sessionPaused &&
+      !studyFocusExit &&
+      session.queue &&
+      session.idx < session.queue.length &&
+      parseRoute().name === "study" &&
+      document.getElementById("flashcard")
+    );
+  }
+
+  function revealCard() {
+    if (!session || session.flipped || sessionPaused || studyFocusExit) return false;
+    if (!session.queue || session.idx >= session.queue.length) return false;
+    session.flipped = true;
+    saveSession();
+    setStudyStatus("Answer revealed");
+    render();
+    return true;
+  }
+
+  function stepCard(delta) {
+    if (!session || session.flipped || sessionPaused || studyFocusExit) return false;
+    if (!session.queue || session.queue.length < 2) return false;
+    if (session.idx < 0 || session.idx >= session.queue.length) return false;
+    if (session.queue.length - session.idx < 2) return false;
+    if (delta > 0) session.queue.push(session.queue.splice(session.idx, 1)[0]);
+    else if (delta < 0) session.queue.splice(session.idx, 0, session.queue.pop());
+    else return false;
+    session.flipped = false;
+    saveSession();
+    setStudyStatus(delta > 0 ? "Next card" : "Previous card");
+    render();
+    return true;
   }
 
   function renderStudy() {
@@ -1407,68 +1682,74 @@
       advance();
       return;
     }
-    openStudyFocus();
+    if (practiceFocus) document.documentElement.classList.add("practice-focus");
+    else document.documentElement.classList.remove("practice-focus");
+    syncExitButton();
     const sec = sectionOf(c.section);
     setChrome(studyScopeTitle(), studyChromeMeta(session.goal), false);
-    const reveal = () => {
-      session.flipped = true;
-      saveSession();
-      setStudyStatus("Answer revealed");
-      render();
-    };
-
-    if (!session.flipped) {
-      root.innerHTML = `
-        <div id="study-wrap">
-          ${studyProgressHtml()}
-          <div class="flashcard dx-card" id="card">
-            <button type="button" class="card-face" id="card-face" aria-label="Reveal answer">
-              <div class="side-label" style="color:${sec.color}">Question &middot; ${esc(sectionLabel(c.section))}</div>
-              ${emojiTag(c, "div", "card-emoji")}
-              <div class="q-text">${rich(c.q)}</div>
-              <div class="tap-hint">Tap card to reveal answer</div>
-            </button>
-            ${cardFolds(c, { tags: true, videos: "all" })}
+    const flipped = !!session.flipped;
+    const hardL = previewInterval(slug, 1);
+    const goodL = previewInterval(slug, 2);
+    const easyL = previewInterval(slug, 3);
+    root.innerHTML = `
+      <div id="study-session" class="study-session">
+        ${studyProgressHtml()}
+        <div id="flashcard" class="flashcard dx-card${flipped ? " is-flipped" : ""}" role="button" tabindex="0" aria-label="Flashcard — tap to flip" aria-keyshortcuts="Space Enter ArrowUp">
+          <div class="ux-swipe-label" aria-hidden="true"></div>
+          <div id="flashcard-front" class="flashcard-face flashcard-front" ${flipped ? "hidden" : ""}>
+            <div class="flashcard-hint" style="color:${sec.color}">${esc(sectionLabel(c.section))}</div>
+            ${emojiTag(c, "div", "card-emoji")}
+            <div class="q-text">${rich(c.q)}</div>
+            <div class="flashcard-hint">Tap to reveal</div>
           </div>
-        </div>`;
-      root.querySelector("#card-face").onclick = reveal;
-    } else {
-      const hardL = previewInterval(slug, 1);
-      const goodL = previewInterval(slug, 2);
-      const easyL = previewInterval(slug, 3);
-      root.innerHTML = `
-        <div id="study-wrap">
-          ${studyProgressHtml()}
-          <div class="flashcard dx-card" id="card">
-            <div class="side-label" style="color:${sec.color}">Question</div>
-            ${emojiTag(c, "div", "card-emoji small")}
+          <div id="flashcard-back" class="flashcard-face flashcard-back" ${flipped ? "" : "hidden"}>
+            <div class="flashcard-hint">Question</div>
             <div class="q-text q-compact">${rich(c.q)}</div>
-            <div class="side-label">Answer</div>
+            <div class="flashcard-hint">Answer</div>
             <div class="a-text">${rich(c.a)}</div>
             <div class="concept-name">${esc(c.title)}</div>
             ${cardFolds(c, { insight: true, tags: true, videos: "all" })}
           </div>
-          <div class="grade-row">
-            <button type="button" class="grade-btn grade-again" data-g="0" aria-label="Again, repeat now">Again<small>now</small></button>
-            <button type="button" class="grade-btn grade-hard" data-g="1" aria-label="Hard, ${hardL}">Hard<small>${hardL}</small></button>
-            <button type="button" class="grade-btn grade-good" data-g="2" aria-label="Good, ${goodL}">Good<small>${goodL}</small></button>
-            <button type="button" class="grade-btn grade-easy" data-g="3" aria-label="Easy, ${easyL}">Easy<small>${easyL}</small></button>
-            <button type="button" class="known-btn" id="mark-known-btn" aria-label="Known, retire this card">Known<small>hide</small></button>
-          </div>
-        </div>`;
-      root.querySelectorAll(".grade-btn").forEach((b) => {
-        b.onclick = () => applySessionGrade(Number(b.dataset.g));
+        </div>
+        <button type="button" id="btn-reveal" class="btn btn-secondary btn-block" ${flipped ? "hidden" : ""} aria-keyshortcuts="Space Enter ArrowUp">Reveal answer</button>
+        <div id="study-actions" class="study-actions" ${flipped ? "" : "hidden"}>
+          <button type="button" id="btn-again" class="btn btn-rate btn-again" aria-keyshortcuts="1 ArrowLeft" aria-label="Again, repeat now"><span class="rate-key">1 ←</span>Again</button>
+          <button type="button" id="btn-hard" class="btn btn-rate btn-hard" aria-keyshortcuts="2 ArrowDown" aria-label="Hard, ${esc(hardL)}"><span class="rate-key">2 ↓</span>Hard</button>
+          <button type="button" id="btn-good" class="btn btn-rate btn-good" aria-keyshortcuts="3 ArrowUp" aria-label="Good, ${esc(goodL)}"><span class="rate-key">3 ↑</span>Good</button>
+          <button type="button" id="btn-easy" class="btn btn-rate btn-easy" aria-keyshortcuts="4 ArrowRight" aria-label="Easy, ${esc(easyL)}"><span class="rate-key">4 →</span>Easy</button>
+          <button type="button" id="mark-known-btn" class="btn btn-rate btn-known" aria-label="Known, retire this card"><span class="rate-key">hide</span>Known</button>
+        </div>
+        <p id="ux-keys" class="ux-keys">Space or Enter reveals. Arrows move, then grade. 1–4 grade. Swipe up to reveal.</p>
+      </div>`;
+    const card = root.querySelector("#flashcard");
+    if (card) {
+      card.addEventListener("click", (e) => {
+        if (blockClick) return;
+        if (e.target.closest && e.target.closest("button, a, .card-fold, .video-row")) return;
+        if (!session.flipped) revealCard();
       });
-      const knownBtn = root.querySelector("#mark-known-btn");
-      if (knownBtn) knownBtn.onclick = retireCurrentCard;
     }
+    const revealBtn = root.querySelector("#btn-reveal");
+    if (revealBtn) revealBtn.addEventListener("click", (e) => { e.stopPropagation(); revealCard(); });
+    [["#btn-again", 0], ["#btn-hard", 1], ["#btn-good", 2], ["#btn-easy", 3]].forEach(([sel, g]) => {
+      const btn = root.querySelector(sel);
+      if (btn) btn.addEventListener("click", () => applySessionGrade(g));
+    });
+    const knownBtn = root.querySelector("#mark-known-btn");
+    if (knownBtn) knownBtn.addEventListener("click", (e) => { e.stopPropagation(); retireCurrentCard(); });
     bindFolds(root);
+    if (card) {
+      try { card.focus({ preventScroll: true }); }
+      catch (e) { try { card.focus(); } catch (err) { /* focus is optional */ } }
+    }
   }
 
   function applySessionGrade(g) {
-    if (!session || !session.flipped || session.idx >= session.queue.length) return;
+    if (!session || !session.flipped || sessionPaused || studyFocusExit) return false;
+    if (session.idx >= session.queue.length) return false;
     const slug = session.queue[session.idx];
     const when = g === 0 ? "repeat now" : `again in ${previewInterval(slug, g)}`;
+    noteCombo(g);
     grade(slug, g);
     setStudyStatus(`${GRADE_LABELS[g]} — ${when}`);
     if (g === 0) {
@@ -1478,6 +1759,7 @@
     }
     saveSession();
     advance();
+    return true;
   }
 
   function previewInterval(slug, g) {
@@ -1524,6 +1806,7 @@
       const xpLine = progress.level != null
         ? `Level ${progress.level} · ${progress.xp || 0} XP`
         : `${progress.xp || 0} XP`;
+      placeClear = true;
       session = null;
       sessionPaused = false;
       clearStoredSession();
@@ -1559,7 +1842,8 @@
           <div><strong>${st.known}</strong><span>Known</span></div>
         </div>
       </section>
-      ${primaryStudyBtn("study-all", queued)}
+      ${continueHtml()}
+      ${startStudyBtn("study-all", queued)}
       <section class="home-section" aria-labelledby="study-sections-title">
         <div class="section-heading">
           <div>
@@ -1570,7 +1854,9 @@
     for (const s of DATA.sections) html += sectionRowHtml(s, stats(s.id), "study");
     html += `</section>`;
     root.innerHTML = html;
-    root.querySelector("#study-all").onclick = resumeOrStart;
+    const cont = root.querySelector("#ux-continue");
+    if (cont) cont.onclick = () => { if (resumeSessionFromPlace()) go("#/study"); };
+    root.querySelector("#study-all").onclick = () => startSession(null);
     root.querySelectorAll(".section-row").forEach((el) => {
       el.onclick = () => startSession(el.dataset.section);
     });
@@ -1579,10 +1865,16 @@
   // ---------- boot ----------
   captureInsightsReturn();
   backBtn.onclick = goBack;
-  const studyExitBtn = document.getElementById("study-exit");
-  if (studyExitBtn) studyExitBtn.onclick = leaveImmersive;
+  const studyExitBtn = document.getElementById("practice-focus-exit");
+  if (studyExitBtn) {
+    studyExitBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      exitPracticeFocus();
+    });
+  }
   tabs.forEach((b) => (b.onclick = () => {
-    if (b.dataset.tab === "study" && sessionLeft() > 0) {
+    if (b.dataset.tab === "study" && sessionLeft() > 0 && capSessionToGoal()) {
       const wasPaused = sessionPaused || studyFocusExit;
       studyFocusExit = false;
       sessionPaused = false;
@@ -1593,29 +1885,205 @@
           videoSlug: session.videoSlug,
         });
       }
-      requestStudyFullscreen();
+      enterPracticeFocus();
       saveSession();
     }
     go(TAB_ROUTES[b.dataset.tab]);
   }));
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && (document.body.classList.contains("study-focus") || document.fullscreenElement)) {
-      e.preventDefault();
-      leaveImmersive();
+  function typingTarget(target) {
+    return !!(target && target.closest && target.closest("input, textarea, select, [contenteditable='true']"));
+  }
+  function onStudyKey(event) {
+    if (!event || event.defaultPrevented) return;
+    if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+    if (event.key === "Escape") {
+      if (!practiceFocus) return;
+      event.preventDefault();
+      exitPracticeFocus();
       return;
     }
-    if (!session || !session.flipped || studyFocusExit || sessionPaused) return;
-    const t = e.target;
-    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
-    const n = Number(e.key);
-    if (n >= 1 && n <= 4) {
-      e.preventDefault();
-      applySessionGrade(n - 1);
+    if (!studyCardOpen() || event.repeat || typingTarget(event.target)) return;
+    const key = event.key;
+    const up = !!(session && session.flipped);
+    const control = event.target && event.target.closest && event.target.closest("button, a");
+    let acted = false;
+    if ((key === " " || event.code === "Space" || key === "Enter") && !control) {
+      if (!up) acted = revealCard();
+      if (key === " " || event.code === "Space") acted = true;
+    } else if (key === "1" || (up && key === "ArrowLeft")) acted = up ? applySessionGrade(0) : false;
+    else if (key === "2" || (up && key === "ArrowDown")) acted = up ? applySessionGrade(1) : false;
+    else if (key === "3" || (up && key === "ArrowUp")) acted = up ? applySessionGrade(2) : false;
+    else if (key === "4" || (up && key === "ArrowRight")) acted = up ? applySessionGrade(3) : false;
+    else if (!up && key === "ArrowLeft") acted = stepCard(-1);
+    else if (!up && key === "ArrowRight") acted = stepCard(1);
+    else if (!up && key === "ArrowUp") acted = revealCard();
+    if (!acted) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  function scrollSnapshot() {
+    const nodes = [document.scrollingElement, root];
+    const saved = [];
+    nodes.forEach((node) => {
+      if (!node) return;
+      saved.push({ node, top: node.scrollTop, left: node.scrollLeft });
+    });
+    return saved;
+  }
+  function restoreScroll(saved) {
+    (saved || []).forEach((item) => {
+      item.node.scrollTop = item.top;
+      item.node.scrollLeft = item.left;
+    });
+  }
+  function swipeLabel(text, kind) {
+    const card = document.getElementById("flashcard");
+    if (!card) return;
+    const label = card.querySelector(".ux-swipe-label");
+    if (!label) return;
+    label.textContent = text;
+    label.className = "ux-swipe-label is-on" + (kind ? " " + kind : "");
+  }
+  function clearDrag() {
+    const card = document.getElementById("flashcard");
+    if (!card) return;
+    card.classList.remove("ux-dragging", "ux-left", "ux-right", "ux-up");
+    if (reduceMotion()) card.style.transform = "";
+    else {
+      card.style.transition = "transform 0.18s var(--ease-out, ease)";
+      card.style.transform = "";
+      setTimeout(() => { card.style.transition = ""; }, 200);
     }
-  });
-  document.addEventListener("fullscreenchange", () => {
-    if (!document.fullscreenElement && document.body.classList.contains("study-focus")) leaveImmersive();
-  });
+    const label = card.querySelector(".ux-swipe-label");
+    if (label) {
+      label.className = "ux-swipe-label";
+      label.textContent = "";
+    }
+  }
+  function applyDrag(dx, dy) {
+    const card = document.getElementById("flashcard");
+    if (!card) return;
+    card.classList.add("ux-dragging");
+    card.classList.remove("ux-left", "ux-right", "ux-up");
+    const up = !!(session && session.flipped);
+    if (Math.abs(dy) > Math.abs(dx) && dy < 0) {
+      card.classList.add("ux-up");
+      swipeLabel("Reveal", "is-reveal");
+    } else if (dx < 0) {
+      card.classList.add("ux-left");
+      swipeLabel(up ? "Again" : "Previous", up ? "is-again" : "is-move");
+    } else {
+      card.classList.add("ux-right");
+      swipeLabel(up ? "Good" : "Next", up ? "is-good" : "is-move");
+    }
+    if (!reduceMotion()) {
+      const x = Math.max(-72, Math.min(72, dx));
+      const y = Math.max(-64, Math.min(24, dy));
+      card.style.transform = `translate3d(${x}px,${y}px,0)`;
+    }
+  }
+  function pressGrade(id) {
+    const wrap = document.getElementById("study-actions");
+    if (!wrap || wrap.hidden) return false;
+    const button = document.getElementById(id);
+    if (!button || button.disabled || button.hidden) return false;
+    button.click();
+    return true;
+  }
+  function finishSwipe(dx, dy) {
+    const distanceX = Math.abs(dx);
+    const distanceY = Math.abs(dy);
+    if (distanceX < 12 && distanceY < 12) return false;
+    blockClick = true;
+    const up = !!(session && session.flipped);
+    if (distanceY > distanceX && dy < -48) {
+      const revealBtn = document.getElementById("btn-reveal");
+      if (revealBtn && !revealBtn.hidden) revealBtn.click();
+      else revealCard();
+      return true;
+    }
+    if (distanceX > distanceY && distanceX > 48) {
+      if (dx < 0) {
+        if (up) pressGrade("btn-again");
+        else stepCard(-1);
+      } else if (up) pressGrade("btn-good");
+      else stepCard(1);
+      return true;
+    }
+    return true;
+  }
+  function onPointerDown(event) {
+    const card = event.target && event.target.closest && event.target.closest("#flashcard");
+    if (!card || !studyCardOpen()) return;
+    blockClick = false;
+    if (swipePointer) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (event.target.closest && event.target.closest("button, a, input, select, textarea, .card-fold, .video-row")) return;
+    swipePointer = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      dx: 0,
+      dy: 0,
+      claimed: false,
+      scroll: false,
+      scrollPos: scrollSnapshot(),
+    };
+  }
+  function onPointerMove(event) {
+    if (!swipePointer || event.pointerId !== swipePointer.id) return;
+    swipePointer.dx = event.clientX - swipePointer.x;
+    swipePointer.dy = event.clientY - swipePointer.y;
+    const distanceX = Math.abs(swipePointer.dx);
+    const distanceY = Math.abs(swipePointer.dy);
+    if (!swipePointer.claimed && !swipePointer.scroll) {
+      if (distanceX < 8 && distanceY < 8) return;
+      if (distanceY > distanceX && swipePointer.dy > 0) {
+        swipePointer.scroll = true;
+        return;
+      }
+      swipePointer.claimed = true;
+      const card = document.getElementById("flashcard");
+      if (card && card.setPointerCapture) {
+        try { card.setPointerCapture(event.pointerId); }
+        catch (e) { /* already released */ }
+      }
+    }
+    if (!swipePointer.claimed || swipePointer.scroll) return;
+    restoreScroll(swipePointer.scrollPos);
+    applyDrag(swipePointer.dx, swipePointer.dy);
+  }
+  function endPointer(event, act) {
+    if (!swipePointer || event.pointerId !== swipePointer.id) return;
+    const dx = swipePointer.dx;
+    const dy = swipePointer.dy;
+    const claimed = swipePointer.claimed;
+    const saved = swipePointer.scrollPos;
+    swipePointer = null;
+    clearDrag();
+    if (!act || !claimed) return;
+    restoreScroll(saved);
+    finishSwipe(dx, dy);
+  }
+  document.addEventListener("keydown", onStudyKey, true);
+  document.addEventListener("pointerdown", onPointerDown);
+  document.addEventListener("pointermove", onPointerMove);
+  document.addEventListener("pointerup", (event) => endPointer(event, true));
+  document.addEventListener("pointercancel", (event) => endPointer(event, false));
+  document.addEventListener("touchmove", (event) => {
+    if (!swipePointer || !swipePointer.claimed) return;
+    if (event.cancelable) event.preventDefault();
+    restoreScroll(swipePointer.scrollPos);
+  }, { passive: false });
+  document.addEventListener("click", (event) => {
+    if (!blockClick) return;
+    if (!event.target.closest || !event.target.closest("#flashcard")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    blockClick = false;
+  }, true);
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+  document.addEventListener("webkitfullscreenchange", onFullscreenChange);
   window.addEventListener("hashchange", () => {
     if (pendingDepth !== null) {
       history.replaceState({ d: pendingDepth }, "");
@@ -1626,7 +2094,7 @@
     }
     if (DATA) {
       render();
-      root.focus();
+      if (!practiceFocus) root.focus();
     }
   });
   if (!history.state) history.replaceState({ d: 0 }, "");
@@ -1637,9 +2105,13 @@
     });
   }
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden" && saveTimer) pushNow();
+    if (document.visibilityState === "hidden") {
+      savePlace();
+      if (saveTimer) pushNow();
+    }
     if (document.visibilityState === "visible") autoLoad();
   });
+  window.addEventListener("pagehide", () => savePlace());
   showConnect();
   if (!window.GhSync) setSyncStatus("GitHub sync failed to load.");
   else setSyncStatus(hasToken() ? "Syncing…" : "Not synced");
@@ -1658,8 +2130,11 @@
       }
       session = hydrateSession(store.session);
       sessionPaused = !!session;
+      studyFocusExit = true;
       window.WikiAnalytics?.bootstrapGamification?.({ dueCount: stats(null).due });
       syncedSnapshot = progressSnapshot();
+      if (session && !(loadPlace().queueIds || []).length) savePlace();
+      applyBootPlace();
       render();
       if (window.GhSync) {
         setInterval(autoLoad, 60000);
