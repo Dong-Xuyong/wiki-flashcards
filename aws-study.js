@@ -341,17 +341,11 @@
     daysLeft: daysLeft,
   };
 
+  // One retry path: gh-sync.js re-fetches, merges and retries a 409 once itself.
   function saveWithRetry(sync, getDoc, onRemote) {
-    var retried = false;
-    function run() {
-      return sync.save(APP_ID, getDoc, onRemote, { quiet: true });
-    }
-    return run().catch(function (err) {
-      if (!retried && /another device/.test(String(err && err.message))) {
-        retried = true;
-        return run();
-      }
-      if (retried && err && typeof err === "object") err.retried = true;
+    return sync.save(APP_ID, getDoc, onRemote, { quiet: true }).catch(function (err) {
+      // a 409 that survived gh-sync's own merge retry: tell the UI it was not saved
+      if (err && typeof err === "object" && err.status === 409) err.retried = true;
       return Promise.reject(err);
     });
   }
