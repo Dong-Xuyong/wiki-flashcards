@@ -576,7 +576,6 @@
   let applyingRemote = false;
   let syncedSnapshot = null;
   let agentUnion = [];
-  let agentList = [];
   let agentViewDirty = false;
 
   function pad2(n) {
@@ -641,7 +640,6 @@
       DATA.concepts.push(card);
       bySlug[card.slug] = card;
     }
-    agentList = surface.list;
   }
   function applyAgentFile(data) {
     if (!window.WikiAgent) return;
@@ -663,54 +661,6 @@
       refreshAgentView();
     }, () => {
       agentViewDirty = false;
-    });
-  }
-  function visibleAgentItems() {
-    if (!agentList.length) return [];
-    if (libSearch) {
-      const q = libSearch.toLowerCase();
-      return agentList.filter((item) =>
-        `${item.title} ${item.note} ${item.conceptSlug} ${item.q} ${item.a}`.toLowerCase().includes(q)
-      );
-    }
-    return libFilter === "all" ? agentList : [];
-  }
-  function isCommitLink(link) {
-    const label = String((link && link.label) || "").trim().toLowerCase();
-    const url = String((link && link.url) || "");
-    return label === "commit" || /github\.com\/[^/]+\/[^/]+\/commit\//i.test(url);
-  }
-  function agentListHtml(items) {
-    if (!items || !items.length) return "";
-    const rows = items.map((item) => {
-      const kind = (window.WikiAgent && WikiAgent.KIND_LABELS[item.kind]) || item.kind;
-      const open = item.openSlug
-        ? `<button type="button" class="agent-open" data-slug="${esc(item.openSlug)}">Open card</button>`
-        : "";
-      const links = (item.links || []).filter((link) => !isCommitLink(link)).map((link) =>
-        `<a class="agent-link" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)}</a>`
-      ).join("");
-      const note = item.note ? `<div class="row-author">${esc(item.note)}</div>` : "";
-      const question = item.q ? `<div class="row-author">Q: ${esc(item.q)}</div>` : "";
-      const actions = open || links ? `<div class="agent-actions">${open}${links}</div>` : "";
-      return `<div class="agent-row">
-        <div class="t"><span>${esc(item.title)}</span><span class="badge agent">${esc(kind)}</span></div>
-        ${note}${question}${actions}
-      </div>`;
-    }).join("");
-    return `<section class="home-section" aria-labelledby="agent-title">
-      <div class="section-heading">
-        <div>
-          <span class="eyebrow">From the agent log</span>
-          <h2 id="agent-title">Added by agent</h2>
-        </div>
-      </div>
-      ${rows}
-    </section>`;
-  }
-  function bindAgentList(scope) {
-    scope.querySelectorAll(".agent-open").forEach((btn) => {
-      btn.onclick = () => go(`#/c/${encodeURIComponent(btn.dataset.slug)}`);
     });
   }
   function scheduleIfChanged() {
@@ -892,8 +842,7 @@
           <button type="button" id="stat-streak"><strong>${studyStreak()}</strong><span>Streak</span></button>
         </div>
       </section>
-      ${primaryStudyBtn("study-all", queued)}
-      ${agentListHtml(agentList)}`;
+      ${primaryStudyBtn("study-all", queued)}`;
     if (next && badgeTitle(next)) {
       html += `
         <button type="button" class="milestone-card dx-card" id="milestone-card">
@@ -935,7 +884,6 @@
         go("#/library");
       };
     });
-    bindAgentList(root);
   }
 
   // ----- library -----

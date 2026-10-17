@@ -26,7 +26,7 @@ Three sections share a suite nav under the header:
 - **Deep links** — `#/c/<concept-slug>` opens a card
 - **AWS study** — suite tab `#/aws` tracks AWS Certified Cloud Practitioner (CLF-C02): domain confidence, practice scores, and a readiness meter. With no GitHub token the tab shows demo data. A saved token syncs `aws-study.json` in Dong-Xuyong/progress-sync, separate from flashcard progress. AWS is not a bottom-bar tab.
 - Progress is kept in this browser and, once a GitHub token is saved (`dong-gh-sync`), merged and synced automatically with `wiki-flashcards.json` in Dong-Xuyong/progress-sync
-- Agent entries in `wiki-flashcards-agent.json` are read on that same sync and never written. A new concept joins the library as a normal concept, and becomes a review card when it has a question and answer and is not already in the deck. Other entries stay on the home Added by agent list. The library does not show that list, an agent badge, or commit chips. Concept emoji is the `e` string older concepts use (`emoji` is accepted as the same value); a missing emoji leaves the slot empty.
+- Agent entries in `wiki-flashcards-agent.json` are read on that same sync and never written. A new concept joins the library as a normal concept, and becomes a review card when it has a question and answer and is not already in the deck. Home does not list the agent log. The library does not show that log, an agent badge, or commit chips. Concept emoji is the `e` string older concepts use (`emoji` is accepted as the same value); a missing emoji leaves the slot empty.
 
 ## Stack
 
