@@ -2115,6 +2115,7 @@
     .then((data) => {
       DATA = data;
       DATA.videos = DATA.videos || {};
+      window.VideoDedupe?.collapseConceptVideos?.(DATA);
       for (const c of data.concepts) {
         if (c) c.e = conceptEmoji(c);
         bySlug[c.slug] = c;
