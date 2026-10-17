@@ -1179,49 +1179,6 @@ mark.hl {
 .badge.known { background: var(--green-soft); color: var(--green); }
 .badge.unknown { background: var(--red-soft); color: var(--red); }
 .badge.due { background: var(--amber-soft); color: var(--amber); }
-.badge.agent { background: var(--accent-soft); color: var(--accent); }
-.agent-row {
-  width: 100%;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  padding: 13px 14px;
-  margin-bottom: 8px;
-  text-align: left;
-  box-shadow: var(--shadow-card);
-}
-.agent-row .t {
-  font-size: 0.93rem;
-  font-weight: 650;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.agent-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-.agent-open,
-.agent-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  padding: 8px 12px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font: inherit;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-decoration: none;
-  cursor: pointer;
-}
-.agent-open:active,
-.agent-link:active { opacity: 0.8; }
 
 .kw-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .kw {
