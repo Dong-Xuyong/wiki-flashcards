@@ -1718,3 +1718,6 @@ input:focus-visible,
 }
 .dx-actions { min-width: 0; }
 #tab-toggle { min-width: 0; }
+
+.badge-new { background: #e8f5e9; color: #1b5e20; }
+html.dark .badge-new { background: #1f3a24; color: #9be3a5; }

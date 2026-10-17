@@ -17,7 +17,16 @@
   const XP_STARTED = 10;
   const XP_COMPLETED = 40;
   const XP_PER_LEVEL = 250;
-  const ASSET_VERSION = "dashboard10";
+  const ASSET_VERSION = "dashboard11";
+  // Data lives in another Pages repo and changes without an app deploy; never reuse a cached copy.
+  const DATA_FETCH = { cache: "no-store" };
+  const dataUrl = (path) => `${DATA_BASE}${path}?v=${ASSET_VERSION}&t=${Date.now()}`;
+  const NEW_DAYS = 7;
+  const addedDate = (v) => String(v.added || v.created || v.updated || "");
+  const isNewVideo = (v) => {
+    const d = Date.parse(addedDate(v));
+    return Number.isFinite(d) && Date.now() - d < NEW_DAYS * 86400000;
+  };
   const BILI_HOVER_RESET_KEY = "wiki-insights-bili-hover-reset-v2";
   const BILI_PROXY =
     "https://wiki-insights-bilibili-proxy.dong-xuyong.workers.dev/video";
@@ -650,8 +659,8 @@
       });
     }
     return [...map.values()].sort((a, b) => {
-      const da = a.updated || a.created || "";
-      const db = b.updated || b.created || "";
+      const da = addedDate(a);
+      const db = addedDate(b);
       if (da !== db) return db.localeCompare(da);
       return String(a.title || "").localeCompare(String(b.title || ""));
     });
@@ -930,12 +939,16 @@
       const pb = catalogProgress(b, progressMap);
       const stateA = watchState(pa);
       const stateB = watchState(pb);
+      const newA = stateA !== "completed" && isNewVideo(a);
+      const newB = stateB !== "completed" && isNewVideo(b);
+      if (newA !== newB) return newA ? -1 : 1;
+      if (newA && newB && addedDate(a) !== addedDate(b)) return addedDate(b).localeCompare(addedDate(a));
       if (rank[stateA] !== rank[stateB]) return rank[stateA] - rank[stateB];
       const activityA = progressMap[a.video_id]?.updated || 0;
       const activityB = progressMap[b.video_id]?.updated || 0;
       if (activityA !== activityB) return activityB - activityA;
-      const dateA = a.updated || a.created || "";
-      const dateB = b.updated || b.created || "";
+      const dateA = addedDate(a);
+      const dateB = addedDate(b);
       if (dateA !== dateB) return dateB.localeCompare(dateA);
       return String(a.title || "").localeCompare(String(b.title || ""));
     });
@@ -1155,7 +1168,7 @@
     if (insightsCache.has(slug)) return insightsCache.get(slug);
     try {
       const res = await fetch(
-        `${DATA_BASE}insights/${encodeURIComponent(slug)}.json?v=${ASSET_VERSION}`
+        dataUrl(`insights/${encodeURIComponent(slug)}.json`), DATA_FETCH
       );
       if (!res.ok) throw new Error("missing");
       const data = await res.json();
@@ -1250,6 +1263,7 @@
           <div class="video-card-body">
             <p class="video-card-title">${esc(video.title)}${
               video.local ? ` <span class="badge-local">Local</span>` : ""
+            }${isNewVideo(video) ? ` <span class="badge-local badge-new">New</span>` : ""
             }</p>
             <div class="video-card-meta">
               ${video.creator ? `<span>${esc(String(video.creator).replace(/-/g, " "))}</span>` : ""}
@@ -2629,7 +2643,7 @@
 
   loadLocal();
   wipeHoverBiliProgress();
-  fetch(`${DATA_BASE}catalog.json?v=${ASSET_VERSION}`)
+  fetch(dataUrl("catalog.json"), DATA_FETCH)
     .then((r) => {
       if (!r.ok) throw new Error("catalog missing");
       return r.json();
