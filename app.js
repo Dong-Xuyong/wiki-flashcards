@@ -573,7 +573,6 @@
   let saving = false;
   let loadingSync = false;
   let saveAgain = false;
-  let retried = false;
   let applyingRemote = false;
   let syncedSnapshot = null;
   let agentUnion = [];
@@ -724,7 +723,6 @@
       if (!hasToken()) setSyncStatus("Not synced");
       return;
     }
-    retried = false;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(pushNow, SAVE_DELAY);
   }
@@ -785,7 +783,6 @@
     }
     return run.then(() => {
       saving = false;
-      retried = false;
       syncedSnapshot = progressSnapshot();
       setSyncStatus("Synced " + hhmm());
       showConnect();
@@ -797,13 +794,7 @@
     }, (err) => {
       saving = false;
       showConnect();
-      if (!retried && /another device/.test(String(err && err.message))) {
-        retried = true;
-        setSyncStatus("Syncing…");
-        saveTimer = setTimeout(pushNow, 1000);
-        return;
-      }
-      failSync(err);
+      failSync(err); // gh-sync.js already re-fetched, merged and tried once more
     });
   }
   function pull() {
