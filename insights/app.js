@@ -1163,6 +1163,26 @@
     return lines.join("\n").trim();
   }
 
+  // a video collapsed from several catalog slugs shows every pack's sections once
+  async function loadVideoInsights(video) {
+    const main = await loadInsights(video.slug);
+    const aliases = video.aliasSlugs || [];
+    if (!aliases.length) return main;
+    const packs = [main, ...(await Promise.all(aliases.map((s) => loadInsights(s))))].filter(Boolean);
+    if (!packs.length) return null;
+    const seen = new Set();
+    const sections = [];
+    for (const pack of packs) {
+      for (const sec of pack.sections || []) {
+        const key = JSON.stringify(sec);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        sections.push(sec);
+      }
+    }
+    return { ...packs[0], sections };
+  }
+
   async function loadInsights(slug) {
     if (localInsights[slug]) return localInsights[slug];
     if (insightsCache.has(slug)) return insightsCache.get(slug);
@@ -2245,10 +2265,14 @@
   }
 
   async function renderDetail(slug) {
-    const v = allVideos().find((x) => x.slug === slug);
+    const v = allVideos().find((x) => x.slug === slug || (x.aliasSlugs || []).includes(slug));
     if (!v) {
       destroyPlayer();
       root.innerHTML = `<div class="empty">Video not found.</div>`;
+      return;
+    }
+    if (v.slug !== slug) {
+      location.replace(`#/v/${encodeURIComponent(v.slug)}`); // old duplicate slug -> merged entry
       return;
     }
     destroyPlayer();
@@ -2305,7 +2329,7 @@
         bindResumePlayer(v.video_id, startAt);
       }
     }
-    const insights = await loadInsights(slug);
+    const insights = await loadVideoInsights(v);
     const activeRoute = parseRoute();
     if (
       currentVideo?.slug !== slug ||
@@ -2650,6 +2674,9 @@
     })
     .then((data) => {
       CATALOG = data;
+      if (window.VideoDedupe && Array.isArray(data.videos)) {
+        CATALOG.videos = window.VideoDedupe.collapseCatalogVideos(data.videos);
+      }
       bootstrapGamification();
       return route();
     })
