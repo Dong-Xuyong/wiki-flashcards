@@ -2,7 +2,11 @@
  * dong-ui GitHub progress sync: one JSON file per app in a private repo.
  * The token lives in localStorage, shared by every app on this origin.
  *
- *   GhSync.save(appId, getPayload, applyPayload) -> Promise<message>
+ *   GhSync.save(appId, getPayload, applyPayload, { quiet, differ }) -> Promise<message>
+ *       quiet: no confirm dialogs and no token prompt (rejects with code "NO_TOKEN").
+ *       differ(remoteData, payload): return false to skip the PUT (already in sync).
+ *       union: applyPayload already added the remote into local; PUT local as-is (no 3-way).
+ *   GhSync.hasToken() -> boolean;  GhSync.connect() -> prompts once for the token
  *   GhSync.load(appId, applyPayload)             -> Promise<message>
  *   GhSync.read(appId) -> Promise<data|null>
  *       GET only, same Contents request and token as load/save. Does not
@@ -165,17 +169,19 @@
     return !!err && (err.status === 409 || /another device/i.test(String(err.message || "")));
   }
 
-  function mergedBody(appId, message, local, remote) {
-    var data = remote && remote.data ? merge3(loadBase(appId), local, remote.data) : local;
+  // union: the app already merged the remote into local (applyPayload adds, never removes),
+  // so local is PUT as-is; the three-way merge could treat "in base, missing remotely" as a delete.
+  function mergedBody(appId, message, local, remote, union) {
+    var data = remote && remote.data && !union ? merge3(loadBase(appId), local, remote.data) : local;
     var body = { message: message, content: toBase64(JSON.stringify(data)) };
     if (remote && remote.sha) body.sha = remote.sha;
     return body;
   }
 
   // remote: the {sha, data} the caller already fetched and passed to applyPayload.
-  function putWithRetry(cfg, appId, body, getPayload, applyPayload, remote) {
+  function putWithRetry(cfg, appId, body, getPayload, applyPayload, remote, union) {
     var local = getPayload();
-    return request(cfg, "PUT", appId + ".json", mergedBody(appId, body.message, local, remote)).then(function (res) {
+    return request(cfg, "PUT", appId + ".json", mergedBody(appId, body.message, local, remote, union)).then(function (res) {
       saveBase(appId, local);
       return res;
     }, function (err) {
@@ -183,7 +189,7 @@
       return fetchRemote(cfg, appId).then(function (fresh) {
         if (fresh && fresh.data && typeof applyPayload === "function") applyPayload(fresh.data);
         var local2 = getPayload();
-        return request(cfg, "PUT", appId + ".json", mergedBody(appId, body.message, local2, fresh)).then(function (res) {
+        return request(cfg, "PUT", appId + ".json", mergedBody(appId, body.message, local2, fresh, union)).then(function (res) {
           saveBase(appId, local2);
           return res;
         }, function (err2) {
@@ -220,30 +226,42 @@
     });
   }
 
-  function save(appId, getPayload, applyPayload) {
+  function save(appId, getPayload, applyPayload, opts) {
     if (isAgentSideFile(appId)) {
       return Promise.reject(new Error("Agent side files are read-only"));
     }
     var cfg;
-    if (
+    var quiet = !!(opts && opts.quiet);
+    if (quiet) {
+      cfg = peekConfig();
+      if (!cfg) {
+        var none = new Error("No GitHub token on this device: not synced");
+        none.code = "NO_TOKEN";
+        return Promise.reject(none);
+      }
+    } else if (
       !global.confirm("Save " + appId + " progress to GitHub?") ||
       !global.confirm("Are you sure? This updates the copy your other devices load.")
     ) {
       return Promise.reject(new Error("Save cancelled"));
     }
     try {
-      cfg = getConfig();
+      cfg = cfg || getConfig();
     } catch (e) {
       return Promise.reject(e);
     }
     return fetchRemote(cfg, appId).then(function (remote) {
       if (remote) applyPayload(remote.data);
+      if (remote && opts && typeof opts.differ === "function" && !opts.differ(remote.data, getPayload())) {
+        saveBase(appId, getPayload());
+        return "Already in sync";
+      }
       var body = {
         message: "Save " + appId + " progress",
         content: toBase64(JSON.stringify(getPayload())),
       };
       if (remote) body.sha = remote.sha;
-      return putWithRetry(cfg, appId, body, getPayload, applyPayload, remote).then(function () {
+      return putWithRetry(cfg, appId, body, getPayload, applyPayload, remote, !!(opts && opts.union)).then(function () {
         return "Saved to GitHub";
       });
     });
@@ -263,5 +281,13 @@
     });
   }
 
-  global.GhSync = { save: save, load: load, read: read };
+  function hasToken() {
+    return !!peekConfig();
+  }
+
+  function connect() {
+    return getConfig();
+  }
+
+  global.GhSync = { save: save, load: load, read: read, hasToken: hasToken, connect: connect };
 })(typeof window !== "undefined" ? window : globalThis);

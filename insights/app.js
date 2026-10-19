@@ -375,6 +375,7 @@
     } else if (seconds < RESUME_MIN_SEC) return;
     else map[videoId] = { t: Math.floor(seconds), updated: Date.now(), done: false };
     localStorage.setItem(PROGRESS_KEY, JSON.stringify(map));
+    if (!!previous?.done !== !!map[videoId]?.done) scheduleSync(); // a completion changed
     if (!clear) {
       recordActiveDay();
       celebrateNewAchievements();
@@ -1796,7 +1797,7 @@
         <a class="secondary-action" href="https://dong-xuyong.github.io/chinese-library/#library">Chinese Library</a>
       </section>
 
-      <p class="local-note">Progress, XP, streaks, and badges are stored only in this browser.</p>
+      <p class="local-note">Completed videos sync automatically to GitHub (progress-sync/wiki-insights.json) on every device with the token. XP, streaks and badges stay in this browser.</p>
     `;
     root.querySelectorAll("[data-progress-status]").forEach((button) => {
       button.addEventListener("click", () =>
@@ -1848,6 +1849,7 @@
   function importCompleted(text) {
     try {
       const added = applyCompleted(JSON.parse(text));
+      if (added) scheduleSync();
       toast(`Imported ${added} new completed video${added === 1 ? "" : "s"}`);
     } catch (e) {
       toast(e instanceof SyntaxError ? "Not a valid JSON file" : e.message);
@@ -2102,6 +2104,111 @@
       (data) => unionAgentEntries(data),
       () => 0
     );
+  }
+
+  // ---- Completed-video sync (progress-sync/wiki-insights.json) --------------------------
+  // Union only: remote completions are added locally first (applyCompleted), then the
+  // local union is PUT, so a device's local-only completions are pushed, never overwritten.
+  const SYNC_DEBOUNCE_MS = 1500;
+  let syncTimer = null;
+  let syncing = null;
+  let syncAgain = false;
+
+  function completedIds(data) {
+    return Object.keys((data && data.completed) || {}).filter((id) => data.completed[id]?.done);
+  }
+
+  /** true when the local payload has a completion the remote file lacks */
+  function completedDiffer(remoteData, localPayload) {
+    const remote = new Set(completedIds(remoteData));
+    return completedIds(localPayload).some((id) => !remote.has(id));
+  }
+
+  function syncBanner(text, { warn = false, connect = false } = {}) {
+    let el = document.getElementById("sync-banner");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "sync-banner";
+      el.setAttribute("role", "status");
+      el.style.cssText =
+        "position:sticky;top:0;z-index:50;padding:8px 12px;font-size:14px;display:flex;gap:8px;align-items:center;justify-content:center;";
+      document.body.prepend(el);
+    }
+    if (!text) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    el.style.background = warn ? "#7a2e1f" : "transparent";
+    el.style.color = warn ? "#fff" : "inherit";
+    el.innerHTML = `<span>${esc(text)}</span>${
+      connect ? '<button type="button" id="sync-connect" class="secondary-action">Connect GitHub</button>' : ""
+    }`;
+    const btn = document.getElementById("sync-connect");
+    if (btn) {
+      btn.addEventListener("click", () => {
+        try {
+          window.GhSync.connect();
+        } catch (e) {
+          return toast(e.message);
+        }
+        runSync();
+      });
+    }
+  }
+
+  function scheduleSync() {
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => {
+      syncTimer = null;
+      runSync();
+    }, SYNC_DEBOUNCE_MS);
+  }
+
+  function runSync() {
+    if (syncing) {
+      syncAgain = true;
+      return syncing;
+    }
+    if (!window.GhSync || typeof GhSync.save !== "function") {
+      syncBanner("⚠️ GitHub sync failed to load: completed videos are only on this device", { warn: true });
+      return Promise.resolve(false);
+    }
+    if (typeof GhSync.hasToken === "function" && !GhSync.hasToken()) {
+      syncBanner("⚠️ Not synced: no GitHub token on this device. Completed videos stay only here.", {
+        warn: true,
+        connect: true,
+      });
+      return Promise.resolve(false);
+    }
+    const before = completedIds(completedPayload()).length;
+    syncing = GhSync.save("wiki-insights", completedPayload, applyCompleted, {
+      quiet: true,
+      union: true,
+      differ: completedDiffer,
+    }).then(
+      () => {
+        syncBanner("");
+        if (completedIds(completedPayload()).length !== before) refreshAgentNotes(); // re-render list views
+        return true;
+      },
+      (err) => {
+        const noToken = err && err.code === "NO_TOKEN";
+        syncBanner(`⚠️ Not synced: ${err && err.message ? err.message : "sync failed"}`, {
+          warn: true,
+          connect: noToken || (err && (err.status === 401 || err.status === 403)),
+        });
+        return false;
+      }
+    ).then((ok) => {
+      syncing = null;
+      if (syncAgain) {
+        syncAgain = false;
+        scheduleSync();
+      }
+      return ok;
+    });
+    return syncing;
   }
 
   function githubSync(mode) {
@@ -2657,12 +2764,26 @@
   });
   window.addEventListener("pagehide", () => {
     persistPlayerTime();
+    if (syncTimer) {
+      clearTimeout(syncTimer);
+      syncTimer = null;
+      runSync();
+    }
   });
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") persistPlayerTime();
-    else readAgentInsights().then((added) => {
-      if (added) refreshAgentNotes();
-    });
+    if (document.visibilityState === "hidden") {
+      persistPlayerTime();
+      if (syncTimer) {
+        clearTimeout(syncTimer);
+        syncTimer = null;
+        runSync(); // flush a pending completion before the tab sleeps
+      }
+    } else {
+      runSync(); // pull + merge + push on every return to the app
+      readAgentInsights().then((added) => {
+        if (added) refreshAgentNotes();
+      });
+    }
   });
 
   loadLocal();
@@ -2680,7 +2801,10 @@
       bootstrapGamification();
       return route();
     })
-    .then(() => readAgentInsights())
+    .then(() => {
+      runSync(); // on open: union remote into local, then push local-only completions
+      return readAgentInsights();
+    })
     .then((added) => {
       if (added) refreshAgentNotes();
     })
