@@ -1,1 +1,63 @@
-/* Study tabs (Cards, AWS, Insights) use the shell kit: .dx-tabs / .dx-tab. */
+/* Study tabs (Cards, AWS, Insights) share one sticky header + tab pill.
+
+   styles.css resets margin and padding on every element. That reset beats the
+   shell kit's :where(.dx-tabs) rules, so on Cards and AWS the pill lost its
+   centering margin and inner padding and sat flush against the left edge.
+   Insights does not use that reset, so its pill stayed centered. These rules
+   use real specificity so all three tabs match the shell. */
+
+.study-chrome {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  flex: 0 0 auto;
+}
+
+/* The bar sticks as one piece. A second sticky header inside it fights the
+   wrapper on the scrolling Insights page. */
+.study-chrome > #topbar {
+  position: relative;
+  top: auto;
+}
+
+.suite-nav.dx-tabs {
+  display: flex;
+  gap: 4px;
+  width: min(560px, calc(100% - 24px));
+  margin: 8px auto 0;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--dx-card);
+  border: 1px solid var(--dx-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-backdrop-filter: blur(var(--dx-blur));
+  backdrop-filter: blur(var(--dx-blur));
+}
+
+.suite-nav.dx-tabs > a,
+.suite-nav.dx-tabs > button {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dx-muted);
+  font: 600 0.9rem/1.1 var(--dx-font);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.suite-nav.dx-tabs > a[aria-current="page"],
+.suite-nav.dx-tabs > a[aria-selected="true"],
+.suite-nav.dx-tabs > button[aria-current="page"],
+.suite-nav.dx-tabs > button[aria-selected="true"] {
+  background: var(--dx-accent-soft);
+  color: var(--dx-accent);
+}
