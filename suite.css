@@ -29,8 +29,12 @@
   left: 0;
   right: 0;
   top: 100%;
-  height: 8px;
-  background: var(--dx-header);
+  /* Taller than the 8px gap so a subpixel seam cannot reveal the sync note.
+     The pill paints over the extra pixels. --dx-bg keeps the seam opaque;
+     --dx-header is translucent. */
+  height: 12px;
+  background-color: var(--dx-bg);
+  background-image: linear-gradient(var(--dx-header), var(--dx-header));
   pointer-events: none;
 }
 
