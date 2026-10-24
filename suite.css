@@ -20,6 +20,20 @@
   top: auto;
 }
 
+/* The 8px gap under the header is margin, so it is transparent. On Insights the
+   sync note is also sticky, and that note shows through the gap once both
+   stick. Paint the header surface across the gap. */
+.study-chrome > #topbar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 8px;
+  background: var(--dx-header);
+  pointer-events: none;
+}
+
 .suite-nav.dx-tabs {
   display: flex;
   gap: 4px;
