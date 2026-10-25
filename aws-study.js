@@ -341,11 +341,17 @@
     daysLeft: daysLeft,
   };
 
-  // One retry path: gh-sync.js re-fetches, merges and retries a 409 once itself.
   function saveWithRetry(sync, getDoc, onRemote) {
-    return sync.save(APP_ID, getDoc, onRemote, { quiet: true }).catch(function (err) {
-      // a 409 that survived gh-sync's own merge retry: tell the UI it was not saved
-      if (err && typeof err === "object" && err.status === 409) err.retried = true;
+    var retried = false;
+    function run() {
+      return sync.save(APP_ID, getDoc, onRemote, { quiet: true });
+    }
+    return run().catch(function (err) {
+      if (!retried && /another device/.test(String(err && err.message))) {
+        retried = true;
+        return run();
+      }
+      if (retried && err && typeof err === "object") err.retried = true;
       return Promise.reject(err);
     });
   }
@@ -827,7 +833,7 @@
         '<div class="aws-actions"><button type="submit" class="aws-btn primary">Save exam</button></div>' +
         "</form>";
     }
-    return '<section class="aws-card dx-card" aria-labelledby="aws-exam-title">' +
+    return '<section class="aws-card" aria-labelledby="aws-exam-title">' +
       '<span class="eyebrow">Exam</span>' +
       '<h2 id="aws-exam-title">' + esc(exam.code || "CLF-C02") + "</h2>" +
       '<p class="aws-when">' + esc(when) + "</p>" +
@@ -847,13 +853,13 @@
     return '<div class="aws-study">' + banner + newer + error +
       '<p class="aws-status" id="aws-sync-status" role="status" aria-live="polite">' + esc(statusText) + "</p>" +
       examHtml() +
-      '<section class="aws-card dx-card" aria-labelledby="aws-domains-title"><span class="eyebrow">CLF-C02</span><h2 id="aws-domains-title">Domains</h2>' +
+      '<section class="aws-card" aria-labelledby="aws-domains-title"><span class="eyebrow">CLF-C02</span><h2 id="aws-domains-title">Domains</h2>' +
         domainsHtml() + "</section>" +
-      '<section class="aws-card dx-card" aria-labelledby="aws-scores-title"><span class="eyebrow">Scores</span><h2 id="aws-scores-title">Practice tests</h2>' +
+      '<section class="aws-card" aria-labelledby="aws-scores-title"><span class="eyebrow">Scores</span><h2 id="aws-scores-title">Practice tests</h2>' +
         chartSvg(liveTests()) + scoresHtml() +
         (readOnly ? "" : '<button type="button" class="aws-btn" data-action="show-score">+ Add score</button>') +
         scoreForm() + "</section>" +
-      '<section class="aws-card dx-card" aria-labelledby="aws-weak-title"><span class="eyebrow">Review next</span><h2 id="aws-weak-title">Weakest topics</h2>' +
+      '<section class="aws-card" aria-labelledby="aws-weak-title"><span class="eyebrow">Review next</span><h2 id="aws-weak-title">Weakest topics</h2>' +
         weakestHtml() + "</section></div>";
   }
 

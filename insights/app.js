@@ -17,16 +17,7 @@
   const XP_STARTED = 10;
   const XP_COMPLETED = 40;
   const XP_PER_LEVEL = 250;
-  const ASSET_VERSION = "dashboard11";
-  // Data lives in another Pages repo and changes without an app deploy; never reuse a cached copy.
-  const DATA_FETCH = { cache: "no-store" };
-  const dataUrl = (path) => `${DATA_BASE}${path}?v=${ASSET_VERSION}&t=${Date.now()}`;
-  const NEW_DAYS = 7;
-  const addedDate = (v) => String(v.added || v.created || v.updated || "");
-  const isNewVideo = (v) => {
-    const d = Date.parse(addedDate(v));
-    return Number.isFinite(d) && Date.now() - d < NEW_DAYS * 86400000;
-  };
+  const ASSET_VERSION = "dashboard10";
   const BILI_HOVER_RESET_KEY = "wiki-insights-bili-hover-reset-v2";
   const BILI_PROXY =
     "https://wiki-insights-bilibili-proxy.dong-xuyong.workers.dev/video";
@@ -375,7 +366,6 @@
     } else if (seconds < RESUME_MIN_SEC) return;
     else map[videoId] = { t: Math.floor(seconds), updated: Date.now(), done: false };
     localStorage.setItem(PROGRESS_KEY, JSON.stringify(map));
-    if (!!previous?.done !== !!map[videoId]?.done) scheduleSync(); // a completion changed
     if (!clear) {
       recordActiveDay();
       celebrateNewAchievements();
@@ -660,8 +650,8 @@
       });
     }
     return [...map.values()].sort((a, b) => {
-      const da = addedDate(a);
-      const db = addedDate(b);
+      const da = a.updated || a.created || "";
+      const db = b.updated || b.created || "";
       if (da !== db) return db.localeCompare(da);
       return String(a.title || "").localeCompare(String(b.title || ""));
     });
@@ -940,16 +930,12 @@
       const pb = catalogProgress(b, progressMap);
       const stateA = watchState(pa);
       const stateB = watchState(pb);
-      const newA = stateA !== "completed" && isNewVideo(a);
-      const newB = stateB !== "completed" && isNewVideo(b);
-      if (newA !== newB) return newA ? -1 : 1;
-      if (newA && newB && addedDate(a) !== addedDate(b)) return addedDate(b).localeCompare(addedDate(a));
       if (rank[stateA] !== rank[stateB]) return rank[stateA] - rank[stateB];
       const activityA = progressMap[a.video_id]?.updated || 0;
       const activityB = progressMap[b.video_id]?.updated || 0;
       if (activityA !== activityB) return activityB - activityA;
-      const dateA = addedDate(a);
-      const dateB = addedDate(b);
+      const dateA = a.updated || a.created || "";
+      const dateB = b.updated || b.created || "";
       if (dateA !== dateB) return dateB.localeCompare(dateA);
       return String(a.title || "").localeCompare(String(b.title || ""));
     });
@@ -1164,32 +1150,12 @@
     return lines.join("\n").trim();
   }
 
-  // a video collapsed from several catalog slugs shows every pack's sections once
-  async function loadVideoInsights(video) {
-    const main = await loadInsights(video.slug);
-    const aliases = video.aliasSlugs || [];
-    if (!aliases.length) return main;
-    const packs = [main, ...(await Promise.all(aliases.map((s) => loadInsights(s))))].filter(Boolean);
-    if (!packs.length) return null;
-    const seen = new Set();
-    const sections = [];
-    for (const pack of packs) {
-      for (const sec of pack.sections || []) {
-        const key = JSON.stringify(sec);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        sections.push(sec);
-      }
-    }
-    return { ...packs[0], sections };
-  }
-
   async function loadInsights(slug) {
     if (localInsights[slug]) return localInsights[slug];
     if (insightsCache.has(slug)) return insightsCache.get(slug);
     try {
       const res = await fetch(
-        dataUrl(`insights/${encodeURIComponent(slug)}.json`), DATA_FETCH
+        `${DATA_BASE}insights/${encodeURIComponent(slug)}.json?v=${ASSET_VERSION}`
       );
       if (!res.ok) throw new Error("missing");
       const data = await res.json();
@@ -1276,7 +1242,7 @@
   function videoCardHtml(video, progress, { compact = false } = {}) {
     const updated = videoUpdatedLabel(video);
     return `
-      <article class="video-card dx-card${compact ? " is-compact" : ""}" data-slug="${esc(
+      <article class="video-card${compact ? " is-compact" : ""}" data-slug="${esc(
         video.slug
       )}" tabindex="0" role="link" aria-label="${esc(`${video.title}. ${watchLabel(progress)}`)}">
         <div class="video-card-top">
@@ -1284,7 +1250,6 @@
           <div class="video-card-body">
             <p class="video-card-title">${esc(video.title)}${
               video.local ? ` <span class="badge-local">Local</span>` : ""
-            }${isNewVideo(video) ? ` <span class="badge-local badge-new">New</span>` : ""
             }</p>
             <div class="video-card-meta">
               ${video.creator ? `<span>${esc(String(video.creator).replace(/-/g, " "))}</span>` : ""}
@@ -1354,7 +1319,7 @@
         ? `${stats.completed} of ${stats.total} completed`
         : `${visibleCount} ${status.replace("-", " ")}`;
     return `
-      <button type="button" class="category-row dx-card${visibleCount ? "" : " is-empty"}"
+      <button type="button" class="category-row${visibleCount ? "" : " is-empty"}"
         data-section="${esc(section.id)}" ${visibleCount ? "" : "disabled"}>
         <span class="category-icon" style="--section-color:${esc(section.color)}"></span>
         <span class="category-row-main">
@@ -1412,7 +1377,7 @@
 
     root.innerHTML = `
       ${subscriptionSelectHtml(library, sub)}
-      <section class="learning-hero dx-card" aria-labelledby="learning-title">
+      <section class="learning-hero" aria-labelledby="learning-title">
         <div class="hero-topline">
           <span class="eyebrow">Level ${account.level}</span>
           <span class="hero-xp">${account.xp} XP</span>
@@ -1473,7 +1438,7 @@
         </div>
       </section>
 
-      <section class="milestone-card dx-card" aria-labelledby="milestone-title">
+      <section class="milestone-card" aria-labelledby="milestone-title">
         <div class="milestone-icon" aria-hidden="true">${esc(nextBadge?.icon || "✓")}</div>
         <div>
           <span class="eyebrow">${nextBadge ? "Next achievement" : "Achievements complete"}</span>
@@ -1633,7 +1598,7 @@
               }
             </div>`
           : `<div class="category-list browse-categories">
-              <button type="button" class="category-row dx-card all-videos-row" data-section="all">
+              <button type="button" class="category-row all-videos-row" data-section="all">
                 <span class="category-icon all-icon" aria-hidden="true">≡</span>
                 <span class="category-row-main">
                   <span class="category-row-title">All videos</span>
@@ -1725,7 +1690,7 @@
     const nextBadge = badges.find((badge) => !badge.unlocked);
 
     root.innerHTML = `
-      <section class="level-card dx-card" aria-labelledby="level-title">
+      <section class="level-card" aria-labelledby="level-title">
         <div class="level-orb" aria-hidden="true">${summary.level}</div>
         <div class="level-main">
           <span class="eyebrow">Current level</span>
@@ -1744,7 +1709,7 @@
         <div><strong>${summary.exploredCategories}</strong><span>Categories</span></div>
       </div>
 
-      <section class="progress-overview dx-card" aria-labelledby="overview-title">
+      <section class="progress-overview" aria-labelledby="overview-title">
         <div class="section-heading">
           <div><span class="eyebrow">Library progress</span><h2 id="overview-title">${summary.completionPct}% completed</h2></div>
           <strong>${summary.completed}/${summary.total}</strong>
@@ -1759,7 +1724,7 @@
 
       ${
         nextBadge
-          ? `<section class="next-badge dx-card">
+          ? `<section class="next-badge">
               <span class="milestone-icon" aria-hidden="true">${esc(nextBadge.icon)}</span>
               <div><span class="eyebrow">Next achievement</span><h2>${esc(nextBadge.title)}</h2>
               <p>${esc(nextBadge.description)} · ${nextBadge.current}/${nextBadge.goal}</p></div>
@@ -1776,7 +1741,7 @@
           ${badges
             .map(
               (badge) => `
-                <article class="achievement-card dx-card${badge.unlocked ? " unlocked" : " locked"}">
+                <article class="achievement-card${badge.unlocked ? " unlocked" : " locked"}">
                   <div class="achievement-icon" aria-hidden="true">${esc(badge.icon)}</div>
                   <h3>${esc(badge.title)}</h3>
                   <p>${esc(badge.description)}</p>
@@ -1797,7 +1762,7 @@
         <a class="secondary-action" href="https://dong-xuyong.github.io/chinese-library/#library">Chinese Library</a>
       </section>
 
-      <p class="local-note">Completed videos sync automatically to GitHub (progress-sync/wiki-insights.json) on every device with the token. XP, streaks and badges stay in this browser.</p>
+      <p class="local-note">Progress, XP, streaks, and badges are stored only in this browser.</p>
     `;
     root.querySelectorAll("[data-progress-status]").forEach((button) => {
       button.addEventListener("click", () =>
@@ -1849,7 +1814,6 @@
   function importCompleted(text) {
     try {
       const added = applyCompleted(JSON.parse(text));
-      if (added) scheduleSync();
       toast(`Imported ${added} new completed video${added === 1 ? "" : "s"}`);
     } catch (e) {
       toast(e instanceof SyntaxError ? "Not a valid JSON file" : e.message);
@@ -2106,111 +2070,6 @@
     );
   }
 
-  // ---- Completed-video sync (progress-sync/wiki-insights.json) --------------------------
-  // Union only: remote completions are added locally first (applyCompleted), then the
-  // local union is PUT, so a device's local-only completions are pushed, never overwritten.
-  const SYNC_DEBOUNCE_MS = 1500;
-  let syncTimer = null;
-  let syncing = null;
-  let syncAgain = false;
-
-  function completedIds(data) {
-    return Object.keys((data && data.completed) || {}).filter((id) => data.completed[id]?.done);
-  }
-
-  /** true when the local payload has a completion the remote file lacks */
-  function completedDiffer(remoteData, localPayload) {
-    const remote = new Set(completedIds(remoteData));
-    return completedIds(localPayload).some((id) => !remote.has(id));
-  }
-
-  function syncBanner(text, { warn = false, connect = false } = {}) {
-    let el = document.getElementById("sync-banner");
-    if (!el) {
-      el = document.createElement("div");
-      el.id = "sync-banner";
-      el.setAttribute("role", "status");
-      el.style.cssText =
-        "position:sticky;top:0;z-index:50;padding:8px 12px;font-size:14px;display:flex;gap:8px;align-items:center;justify-content:center;";
-      document.body.prepend(el);
-    }
-    if (!text) {
-      el.hidden = true;
-      return;
-    }
-    el.hidden = false;
-    el.style.background = warn ? "#7a2e1f" : "transparent";
-    el.style.color = warn ? "#fff" : "inherit";
-    el.innerHTML = `<span>${esc(text)}</span>${
-      connect ? '<button type="button" id="sync-connect" class="secondary-action">Connect GitHub</button>' : ""
-    }`;
-    const btn = document.getElementById("sync-connect");
-    if (btn) {
-      btn.addEventListener("click", () => {
-        try {
-          window.GhSync.connect();
-        } catch (e) {
-          return toast(e.message);
-        }
-        runSync();
-      });
-    }
-  }
-
-  function scheduleSync() {
-    clearTimeout(syncTimer);
-    syncTimer = setTimeout(() => {
-      syncTimer = null;
-      runSync();
-    }, SYNC_DEBOUNCE_MS);
-  }
-
-  function runSync() {
-    if (syncing) {
-      syncAgain = true;
-      return syncing;
-    }
-    if (!window.GhSync || typeof GhSync.save !== "function") {
-      syncBanner("⚠️ GitHub sync failed to load: completed videos are only on this device", { warn: true });
-      return Promise.resolve(false);
-    }
-    if (typeof GhSync.hasToken === "function" && !GhSync.hasToken()) {
-      syncBanner("⚠️ Not synced: no GitHub token on this device. Completed videos stay only here.", {
-        warn: true,
-        connect: true,
-      });
-      return Promise.resolve(false);
-    }
-    const before = completedIds(completedPayload()).length;
-    syncing = GhSync.save("wiki-insights", completedPayload, applyCompleted, {
-      quiet: true,
-      union: true,
-      differ: completedDiffer,
-    }).then(
-      () => {
-        syncBanner("");
-        if (completedIds(completedPayload()).length !== before) refreshAgentNotes(); // re-render list views
-        return true;
-      },
-      (err) => {
-        const noToken = err && err.code === "NO_TOKEN";
-        syncBanner(`⚠️ Not synced: ${err && err.message ? err.message : "sync failed"}`, {
-          warn: true,
-          connect: noToken || (err && (err.status === 401 || err.status === 403)),
-        });
-        return false;
-      }
-    ).then((ok) => {
-      syncing = null;
-      if (syncAgain) {
-        syncAgain = false;
-        scheduleSync();
-      }
-      return ok;
-    });
-    return syncing;
-  }
-
   function githubSync(mode) {
     if (!window.GhSync) return toast("GitHub sync unavailable");
     const run =
@@ -2296,7 +2155,7 @@
       <div class="concept-grid">
         ${list
           .map(
-            (c) => `<article class="concept-card dx-card">
+            (c) => `<article class="concept-card">
             <a class="concept-chip" href="${esc(
               `${FLASHCARDS_URL}#/c/${encodeURIComponent(c.slug)}`
             )}">
@@ -2372,14 +2231,10 @@
   }
 
   async function renderDetail(slug) {
-    const v = allVideos().find((x) => x.slug === slug || (x.aliasSlugs || []).includes(slug));
+    const v = allVideos().find((x) => x.slug === slug);
     if (!v) {
       destroyPlayer();
       root.innerHTML = `<div class="empty">Video not found.</div>`;
-      return;
-    }
-    if (v.slug !== slug) {
-      location.replace(`#/v/${encodeURIComponent(v.slug)}`); // old duplicate slug -> merged entry
       return;
     }
     destroyPlayer();
@@ -2436,7 +2291,7 @@
         bindResumePlayer(v.video_id, startAt);
       }
     }
-    const insights = await loadVideoInsights(v);
+    const insights = await loadInsights(slug);
     const activeRoute = parseRoute();
     if (
       currentVideo?.slug !== slug ||
@@ -2764,47 +2619,27 @@
   });
   window.addEventListener("pagehide", () => {
     persistPlayerTime();
-    if (syncTimer) {
-      clearTimeout(syncTimer);
-      syncTimer = null;
-      runSync();
-    }
   });
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") {
-      persistPlayerTime();
-      if (syncTimer) {
-        clearTimeout(syncTimer);
-        syncTimer = null;
-        runSync(); // flush a pending completion before the tab sleeps
-      }
-    } else {
-      runSync(); // pull + merge + push on every return to the app
-      readAgentInsights().then((added) => {
-        if (added) refreshAgentNotes();
-      });
-    }
+    if (document.visibilityState === "hidden") persistPlayerTime();
+    else readAgentInsights().then((added) => {
+      if (added) refreshAgentNotes();
+    });
   });
 
   loadLocal();
   wipeHoverBiliProgress();
-  fetch(dataUrl("catalog.json"), DATA_FETCH)
+  fetch(`${DATA_BASE}catalog.json?v=${ASSET_VERSION}`)
     .then((r) => {
       if (!r.ok) throw new Error("catalog missing");
       return r.json();
     })
     .then((data) => {
       CATALOG = data;
-      if (window.VideoDedupe && Array.isArray(data.videos)) {
-        CATALOG.videos = window.VideoDedupe.collapseCatalogVideos(data.videos);
-      }
       bootstrapGamification();
       return route();
     })
-    .then(() => {
-      runSync(); // on open: union remote into local, then push local-only completions
-      return readAgentInsights();
-    })
+    .then(() => readAgentInsights())
     .then((added) => {
       if (added) refreshAgentNotes();
     })

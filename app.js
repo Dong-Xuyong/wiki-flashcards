@@ -23,19 +23,6 @@
   let bySlug = {};
   let session = null; // { queue, idx, flipped, hint, total, sectionId, videoSlug, done, goal, grades }
   let sessionPaused = false;
-  let studyFocusExit = true;
-  let undoTimer = null;
-  let undoState = null;
-  const PLACE_KEY = "wiki-study-place-v1";
-  let resumeLock = 0;
-  let blockClick = false;
-  let swipePointer = null;
-  let browserFullscreen = false;
-  let practiceFocus = false;
-  let pendingCombo = null;
-  let placeClear = false;
-  const bootHash = location.hash || "";
-  const reduceQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
   let store = load();
   let pendingDepth = null; // history depth to stamp on the entry go() is creating
   let detailReveal = { slug: null, on: false };
@@ -75,7 +62,7 @@
   }
 
   function load() {
-    let data = { cards: {}, streak: { last: null, count: 0 }, libOpen: {}, retired: [] };
+    let data = { cards: {}, streak: { last: null, count: 0 }, libOpen: {} };
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) {
@@ -83,7 +70,6 @@
         if (parsed && typeof parsed === "object") Object.assign(data, parsed);
       }
     } catch (e) { /* corrupted store -> start fresh */ }
-    data.retired = normalizeRetired(data.retired);
     session = hydrateSession(data.session);
     sessionPaused = !!session;
     return data;
@@ -107,7 +93,6 @@
       grades: session.grades || emptyGrades(),
     };
     save();
-    savePlace();
   }
   function clearStoredSession() {
     delete store.session;
@@ -121,13 +106,10 @@
   // ---------- card state helpers ----------
   const isKnown = (s) => (store.cards[s] || {}).st === "known";
   const isUnknown = (s) => (store.cards[s] || {}).st === "unknown";
-  const isNew = (s) => {
-    if (isRetired(s)) return false;
-    return !store.cards[s] || (store.cards[s].reps === 0 && !store.cards[s].st);
-  };
+  const isNew = (s) => !store.cards[s] || (store.cards[s].reps === 0 && !store.cards[s].st);
   const isDue = (s) => {
     const c = store.cards[s];
-    if (!c || isKnown(s) || isRetired(s)) return false;
+    if (!c || isKnown(s)) return false;
     return (c.reps > 0 || c.st === "unknown") && c.due <= Date.now();
   };
 
@@ -143,46 +125,6 @@
     c.st = null;
     c.last = Date.now();
     save();
-  }
-
-  /** Retired ids sync inside wiki-flashcards.json. Newer `t` wins; `on: false` is an unhide. */
-  function normalizeRetired(raw) {
-    const map = new Map();
-    const list = Array.isArray(raw) ? raw : [];
-    list.forEach((item) => {
-      let rec = null;
-      if (typeof item === "string" && item) rec = { id: item, t: 0, on: true };
-      else if (item && typeof item === "object" && item.id) {
-        rec = { id: String(item.id), t: Number(item.t) || 0, on: item.on !== false };
-      }
-      if (!rec || !rec.id) return;
-      const prev = map.get(rec.id);
-      if (!prev || rec.t >= prev.t) map.set(rec.id, rec);
-    });
-    return [...map.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  }
-  function mergeRetired(a, b) {
-    return normalizeRetired([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])]);
-  }
-  function isRetired(slug) {
-    return normalizeRetired(store.retired).some((rec) => rec.on && rec.id === slug);
-  }
-  function isLibraryKnown(slug) {
-    return isRetired(slug) || isKnown(slug);
-  }
-  function retireSlug(slug) {
-    const next = normalizeRetired(store.retired).filter((rec) => rec.id !== slug);
-    next.push({ id: slug, t: Date.now(), on: true });
-    store.retired = normalizeRetired(next);
-    markKnown(slug);
-  }
-  function unhideSlug(slug) {
-    const wasRetired = isRetired(slug);
-    const next = normalizeRetired(store.retired).filter((rec) => rec.id !== slug);
-    if (wasRetired) next.push({ id: slug, t: Date.now(), on: false });
-    store.retired = normalizeRetired(next);
-    if ((store.cards[slug] || {}).st === "known") clearMark(slug);
-    else save();
   }
 
   function clamp(n, lo, hi) {
@@ -275,7 +217,7 @@
   }
 
   function buildQueue(opts) {
-    const pool = poolFor(opts).filter((c) => !isRetired(c.slug));
+    const pool = poolFor(opts);
     if (opts && opts.all) {
       const every = pool.map((c) => c.slug);
       shuffle(every);
@@ -303,9 +245,9 @@
     const pool = poolFor(typeof scope === "string" || !scope ? { sectionId: scope } : scope);
     let due = 0, known = 0, unknown = 0, fresh = 0;
     for (const c of pool) {
-      if (isLibraryKnown(c.slug)) known++;
+      if (isKnown(c.slug)) known++;
       else if (isDue(c.slug)) due++;
-      if (isUnknown(c.slug) && !isRetired(c.slug)) unknown++;
+      if (isUnknown(c.slug)) unknown++;
       if (isNew(c.slug)) fresh++;
     }
     return { total: pool.length, due, known, unknown, fresh };
@@ -410,16 +352,12 @@
 
   function primaryStudyBtn(id, queued) {
     const left = sessionLeft();
-    if (left > 0 && goalRoom() > 0) {
+    if (left > 0) {
       return `<button type="button" class="primary-action" id="${id}">
-        <span><small>Continue</small><strong>Resume ${Math.min(left, goalRoom())} left</strong></span>
+        <span><small>Continue</small><strong>Resume ${left} left</strong></span>
         <span class="primary-arrow" aria-hidden="true">→</span>
       </button>`;
     }
-    return startStudyBtn(id, queued);
-  }
-
-  function startStudyBtn(id, queued) {
     const goal = dailyGoal(null);
     return `<button type="button" class="primary-action" id="${id}" ${queued === 0 ? "disabled" : ""}>
       <span>
@@ -431,18 +369,13 @@
   }
 
   function resumeOrStart() {
-    if (sessionLeft() > 0 && capSessionToGoal()) {
-      const wasPaused = sessionPaused || studyFocusExit;
+    if (sessionLeft() > 0) {
       sessionPaused = false;
-      studyFocusExit = false;
-      if (wasPaused) {
-        window.WikiAnalytics?.record({
-          type: "session_resume",
-          sectionId: session.sectionId,
-          videoSlug: session.videoSlug,
-        });
-      }
-      enterPracticeFocus();
+      window.WikiAnalytics?.record({
+        type: "session_resume",
+        sectionId: session.sectionId,
+        videoSlug: session.videoSlug,
+      });
       saveSession();
       go("#/study");
       return;
@@ -451,10 +384,6 @@
   }
 
   function maybePauseSession(routeName) {
-    if (routeName !== "study") {
-      studyFocusExit = true;
-      closeStudyFocus();
-    }
     if (routeName === "study") return;
     if (session && session.idx < session.queue.length && !sessionPaused) {
       sessionPaused = true;
@@ -531,16 +460,17 @@
       if (a.dataset.suite === suiteCurrent) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     });
-    if (r.name === "concept") renderDetail(r.slug);
-    else if (r.name === "video") renderVideo(r.slug);
-    else if (r.name === "library") renderLibrary();
-    else if (r.name === "study") renderStudy();
-    else if (r.name === "analytics") renderAnalytics();
-    else if (r.name === "aws") {
-      if (window.AwsStudy && typeof window.AwsStudy.render === "function") window.AwsStudy.render(root);
-      else root.textContent = "AWS study failed to load.";
-    } else renderHome();
-    if (!resumeLock) savePlace();
+    if (r.name === "concept") return renderDetail(r.slug);
+    if (r.name === "video") return renderVideo(r.slug);
+    if (r.name === "library") return renderLibrary();
+    if (r.name === "study") return renderStudy();
+    if (r.name === "analytics") return renderAnalytics();
+    if (r.name === "aws") {
+      if (window.AwsStudy && typeof window.AwsStudy.render === "function") return window.AwsStudy.render(root);
+      root.textContent = "AWS study failed to load.";
+      return;
+    }
+    return renderHome();
   }
 
   function renderAnalytics() {
@@ -573,9 +503,11 @@
   let saving = false;
   let loadingSync = false;
   let saveAgain = false;
+  let retried = false;
   let applyingRemote = false;
   let syncedSnapshot = null;
   let agentUnion = [];
+  let agentList = [];
   let agentViewDirty = false;
 
   function pad2(n) {
@@ -605,7 +537,6 @@
     return JSON.stringify({
       cards: store.cards,
       analytics: window.WikiAnalytics?.load?.() || null,
-      retired: normalizeRetired(store.retired),
     });
   }
   function failSync(err) {
@@ -614,7 +545,7 @@
   }
   function refreshIfProgressChanged(before) {
     if (!DATA || progressSnapshot() === before) return;
-    if (document.querySelector("#study-session, .done-panel")) return;
+    if (document.querySelector("#study-wrap, .done-panel")) return;
     const active = document.activeElement;
     if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
     render();
@@ -622,7 +553,7 @@
   function refreshAgentView() {
     if (!DATA || !agentViewDirty) return;
     agentViewDirty = false;
-    if (document.querySelector("#study-session, .done-panel")) return;
+    if (document.querySelector("#study-wrap, .done-panel")) return;
     const active = document.activeElement;
     if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
     render();
@@ -640,6 +571,7 @@
       DATA.concepts.push(card);
       bySlug[card.slug] = card;
     }
+    agentList = surface.list;
   }
   function applyAgentFile(data) {
     if (!window.WikiAgent) return;
@@ -663,6 +595,54 @@
       agentViewDirty = false;
     });
   }
+  function visibleAgentItems() {
+    if (!agentList.length) return [];
+    if (libSearch) {
+      const q = libSearch.toLowerCase();
+      return agentList.filter((item) =>
+        `${item.title} ${item.note} ${item.conceptSlug} ${item.q} ${item.a}`.toLowerCase().includes(q)
+      );
+    }
+    return libFilter === "all" ? agentList : [];
+  }
+  function isCommitLink(link) {
+    const label = String((link && link.label) || "").trim().toLowerCase();
+    const url = String((link && link.url) || "");
+    return label === "commit" || /github\.com\/[^/]+\/[^/]+\/commit\//i.test(url);
+  }
+  function agentListHtml(items) {
+    if (!items || !items.length) return "";
+    const rows = items.map((item) => {
+      const kind = (window.WikiAgent && WikiAgent.KIND_LABELS[item.kind]) || item.kind;
+      const open = item.openSlug
+        ? `<button type="button" class="agent-open" data-slug="${esc(item.openSlug)}">Open card</button>`
+        : "";
+      const links = (item.links || []).filter((link) => !isCommitLink(link)).map((link) =>
+        `<a class="agent-link" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)}</a>`
+      ).join("");
+      const note = item.note ? `<div class="row-author">${esc(item.note)}</div>` : "";
+      const question = item.q ? `<div class="row-author">Q: ${esc(item.q)}</div>` : "";
+      const actions = open || links ? `<div class="agent-actions">${open}${links}</div>` : "";
+      return `<div class="agent-row">
+        <div class="t"><span>${esc(item.title)}</span><span class="badge agent">${esc(kind)}</span></div>
+        ${note}${question}${actions}
+      </div>`;
+    }).join("");
+    return `<section class="home-section" aria-labelledby="agent-title">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">From the agent log</span>
+          <h2 id="agent-title">Added by agent</h2>
+        </div>
+      </div>
+      ${rows}
+    </section>`;
+  }
+  function bindAgentList(scope) {
+    scope.querySelectorAll(".agent-open").forEach((btn) => {
+      btn.onclick = () => go(`#/c/${encodeURIComponent(btn.dataset.slug)}`);
+    });
+  }
   function scheduleIfChanged() {
     if (progressSnapshot() === syncedSnapshot) return;
     scheduleSync();
@@ -673,6 +653,7 @@
       if (!hasToken()) setSyncStatus("Not synced");
       return;
     }
+    retried = false;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(pushNow, SAVE_DELAY);
   }
@@ -683,7 +664,6 @@
       exportedAt: new Date().toISOString(),
       cards: store.cards,
       analytics: window.WikiAnalytics?.load?.() || null,
-      retired: normalizeRetired(store.retired),
     };
   }
   function applyProgress(data) {
@@ -692,16 +672,11 @@
     }
     const preKey = `${STORE_KEY}-pre-import`;
     if (localStorage.getItem(preKey) == null) {
-      localStorage.setItem(preKey, JSON.stringify({
-        cards: store.cards,
-        analytics: window.WikiAnalytics?.load?.(),
-        retired: normalizeRetired(store.retired),
-      }));
+      localStorage.setItem(preKey, JSON.stringify({ cards: store.cards, analytics: window.WikiAnalytics?.load?.() }));
     }
     applyingRemote = true;
     try {
       store.cards = WikiAnalytics.mergeCards(store.cards, data.cards);
-      if (data.retired != null) store.retired = mergeRetired(store.retired, data.retired);
       save();
       if (data.analytics) WikiAnalytics.mergeFrom(data.analytics);
     } finally {
@@ -733,6 +708,7 @@
     }
     return run.then(() => {
       saving = false;
+      retried = false;
       syncedSnapshot = progressSnapshot();
       setSyncStatus("Synced " + hhmm());
       showConnect();
@@ -744,7 +720,13 @@
     }, (err) => {
       saving = false;
       showConnect();
-      failSync(err); // gh-sync.js already re-fetched, merged and tried once more
+      if (!retried && /another device/.test(String(err && err.message))) {
+        retried = true;
+        setSyncStatus("Syncing…");
+        saveTimer = setTimeout(pushNow, 1000);
+        return;
+      }
+      failSync(err);
     });
   }
   function pull() {
@@ -806,7 +788,7 @@
       ? `${ss.due} due · ${ss.fresh} new`
       : `${ss.known}/${ss.total} known${ss.due ? ` · ${ss.due} due` : ""}`;
     return `
-      <button type="button" class="section-row dx-card" data-section="${s.id}">
+      <button type="button" class="section-row" data-section="${s.id}">
         <span class="section-dot" style="background:${s.color}"></span>
         <span class="section-row-main">
           <span class="name">${esc(s.title)}</span>
@@ -829,7 +811,7 @@
     const next = progress.nextBadge;
     setChrome("Wiki Review Cards", studyChromeMeta(goal), false);
     let html = `
-      <section class="learning-hero dx-card" aria-labelledby="learning-title">
+      <section class="learning-hero" aria-labelledby="learning-title">
         <div class="hero-topline">
           <span class="eyebrow">Today</span>
           <span class="hero-xp">${esc(xpLine)}</span>
@@ -842,10 +824,11 @@
           <button type="button" id="stat-streak"><strong>${studyStreak()}</strong><span>Streak</span></button>
         </div>
       </section>
-      ${primaryStudyBtn("study-all", queued)}`;
+      ${primaryStudyBtn("study-all", queued)}
+      ${agentListHtml(agentList)}`;
     if (next && badgeTitle(next)) {
       html += `
-        <button type="button" class="milestone-card dx-card" id="milestone-card">
+        <button type="button" class="milestone-card" id="milestone-card">
           <span class="milestone-icon" aria-hidden="true">★</span>
           <span>
             <span class="eyebrow">Next badge</span>
@@ -884,6 +867,7 @@
         go("#/library");
       };
     });
+    bindAgentList(root);
   }
 
   // ----- library -----
@@ -902,15 +886,15 @@
       </div>
       <div id="lib-list"></div>`;
     const box = root.querySelector("#search-box");
-    box.oninput = () => { libSearch = box.value; renderLibList(); savePlace(); };
+    box.oninput = () => { libSearch = box.value; renderLibList(); };
     root.querySelectorAll(".filter-chip").forEach((b) => {
-      b.onclick = () => { libFilter = b.dataset.f; savePlace(); renderLibrary(); };
+      b.onclick = () => { libFilter = b.dataset.f; renderLibrary(); };
     });
     renderLibList();
   }
 
   function conceptMatches(c) {
-    if (libFilter === "known" && !isLibraryKnown(c.slug)) return false;
+    if (libFilter === "known" && !isKnown(c.slug)) return false;
     if (libFilter === "unknown" && !isUnknown(c.slug)) return false;
     if (libFilter === "due" && !isDue(c.slug)) return false;
     if (libFilter === "new" && !isNew(c.slug)) return false;
@@ -940,7 +924,7 @@
 
   function conceptRow(c) {
     let badge = "";
-    if (isLibraryKnown(c.slug)) badge = `<span class="badge known">Known</span>`;
+    if (isKnown(c.slug)) badge = `<span class="badge known">Known</span>`;
     else if (isUnknown(c.slug)) badge = `<span class="badge unknown">Unknown</span>`;
     else if (isDue(c.slug)) badge = `<span class="badge due">Due</span>`;
     const kws = (c.keywords || []).slice(0, 4).map((k) => `<span class="kw">${esc(k)}</span>`).join("");
@@ -950,18 +934,12 @@
     const authorLine = uniqAuthors.length
       ? `<span class="row-author">${esc(uniqAuthors.join(" · "))}</span>`
       : "";
-    const body = `
+    return `
+      <button type="button" class="concept-row" data-slug="${c.slug}">
         <span class="t">${emoji}<span>${esc(c.title)}</span>${badge}</span>
         ${authorLine}
-        ${kws ? `<span class="kw-row">${kws}</span>` : ""}`;
-    if (!isLibraryKnown(c.slug)) {
-      return `<button type="button" class="concept-row dx-card" data-slug="${esc(c.slug)}">${body}</button>`;
-    }
-    return `
-      <div class="concept-row dx-card is-known-row" data-slug="${esc(c.slug)}">
-        <button type="button" class="concept-open" data-slug="${esc(c.slug)}">${body}</button>
-        <button type="button" class="unhide-btn" data-slug="${esc(c.slug)}">Unhide</button>
-      </div>`;
+        ${kws ? `<span class="kw-row">${kws}</span>` : ""}
+      </button>`;
   }
 
   function renderLibList() {
@@ -984,7 +962,7 @@
         const open = !!store.libOpen[s.id];
         const bodyId = `lib-body-${s.id}`;
         html += `
-          <div class="lib-group dx-card ${open ? "open" : ""}" data-section="${s.id}">
+          <div class="lib-group ${open ? "open" : ""}" data-section="${s.id}">
             <button type="button" class="lib-group-head" aria-expanded="${open}" aria-controls="${bodyId}">
               <span class="section-dot" style="background:${s.color}"></span>
               <span class="name">${esc(s.title)}</span>
@@ -1010,16 +988,8 @@
   }
 
   function bindConceptRows(scope) {
-    scope.querySelectorAll("button.concept-row, .concept-open").forEach((r) => {
+    scope.querySelectorAll(".concept-row").forEach((r) => {
       r.onclick = () => go(`#/c/${encodeURIComponent(r.dataset.slug)}`);
-    });
-    scope.querySelectorAll(".unhide-btn").forEach((btn) => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        unhideSlug(btn.dataset.slug);
-        if (parseRoute().name === "library") renderLibrary();
-        else render();
-      };
     });
   }
 
@@ -1032,14 +1002,14 @@
       detailReveal = { slug, on: false };
     }
     const revealed = detailReveal.on;
-    const known = isLibraryKnown(slug);
+    const known = isKnown(slug);
     const emoji = emojiTag(c, "span", "detail-emoji");
     root.innerHTML = `
       <div class="detail-title">${emoji}${esc(c.title)}
         ${known ? '<span class="badge known">Known</span>' : isUnknown(slug) ? '<span class="badge unknown">Unknown</span>' : ""}
       </div>
       ${c.keywords.length ? `<div class="kw-row">${c.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}
-      <div class="panel qa-block dx-card">
+      <div class="panel qa-block">
         <div class="q">Q: ${rich(c.q)}</div>
         ${revealed ? `<div class="a">A: ${rich(c.a)}</div>${c.x ? `<div class="x">Example: ${rich(c.x)}</div>` : ""}`
           : `<button type="button" class="reveal-answer" id="reveal-answer">Reveal answer</button>`}
@@ -1047,7 +1017,7 @@
       ${c.definition ? `<div class="detail-def">${esc(c.definition)}</div>` : ""}
       ${(c.videos && c.videos.length) ? `<h2 class="head">From these videos</h2>${videoRowsHtml(c.videos, false)}` : ""}
       ${revealed ? `<button type="button" class="toggle-known-btn ${known ? "is-known" : ""}" id="toggle-known">
-        ${known ? "Unhide" : "Mark as known"}
+        ${known ? "&#10003; Marked as known — tap to unmark" : "Mark as known"}
       </button>` : ""}
       ${c.related.length ? `<h2 class="head">Related concepts</h2>
         <div class="related-list">
@@ -1060,11 +1030,7 @@
     };
     const toggle = root.querySelector("#toggle-known");
     if (toggle) toggle.onclick = () => {
-      if (known) unhideSlug(slug);
-      else {
-        retireSlug(slug);
-        showKnownUndo(slug, null);
-      }
+      known ? clearMark(slug) : markKnown(slug);
       render();
     };
     root.querySelectorAll(".related-link").forEach((b) => {
@@ -1127,399 +1093,10 @@
   }
 
   // ----- study -----
-  function reduceMotion() {
-    return !!(reduceQuery && reduceQuery.matches);
-  }
-  function localDay(t) {
-    const d = new Date(t);
-    if (Number.isNaN(d.getTime())) return "";
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
-  function loadPlace() {
-    try {
-      const data = JSON.parse(localStorage.getItem(PLACE_KEY) || "null");
-      return data && typeof data === "object" ? data : {};
-    } catch (e) {
-      return {};
-    }
-  }
-  function snapshotPlace() {
-    const prev = loadPlace();
-    const routeName = DATA ? parseRoute().name : "home";
-    const tab = TAB_FOR[routeName] || prev.tab || "home";
-    const data = {
-      v: 1,
-      tab,
-      search: libSearch,
-      libFilter: libFilter || "all",
-      deck: prev.deck || "",
-      deckKind: prev.deckKind || "",
-      index: Number(prev.index) || 0,
-      cardId: prev.cardId || "",
-      queueIds: Array.isArray(prev.queueIds) ? prev.queueIds.slice() : [],
-      flipped: !!prev.flipped,
-      active: !!prev.active,
-      done: Number(prev.done) || 0,
-      grades: prev.grades || emptyGrades(),
-      goal: Number(prev.goal) || 0,
-      combo: pendingCombo ? pendingCombo.combo : (Number(prev.combo) || 0),
-      comboAt: pendingCombo ? pendingCombo.comboAt : (Number(prev.comboAt) || 0),
-    };
-    if (session && session.queue && session.queue.length && session.idx < session.queue.length) {
-      data.index = session.idx || 0;
-      data.flipped = !!session.flipped;
-      data.queueIds = session.queue.slice();
-      data.cardId = session.queue[session.idx] || "";
-      data.done = Number(session.done) || 0;
-      data.grades = session.grades || emptyGrades();
-      data.goal = Number(session.goal) || 0;
-      data.active = true;
-      if (session.videoSlug) {
-        data.deck = session.videoSlug;
-        data.deckKind = "video";
-      } else if (session.sectionId) {
-        data.deck = session.sectionId;
-        data.deckKind = "section";
-      } else {
-        data.deck = "";
-        data.deckKind = "";
-      }
-    } else if (session || placeClear) {
-      data.active = false;
-      data.queueIds = [];
-      data.cardId = "";
-      data.index = 0;
-      data.flipped = false;
-      data.deck = "";
-      data.deckKind = "";
-      data.done = 0;
-      placeClear = false;
-    }
-    return data;
-  }
-  function savePlace() {
-    if (resumeLock || !DATA) return;
-    try { localStorage.setItem(PLACE_KEY, JSON.stringify(snapshotPlace())); }
-    catch (e) { /* private mode */ }
-  }
-  function goalRoom() {
-    const goal = dailyGoal(null);
-    const reviewed = todayReviews();
-    if (typeof reviewed !== "number" || !isFinite(reviewed) || reviewed < 0) return goal > 0 ? goal : 0;
-    return Math.max(0, goal - reviewed);
-  }
-  function capSessionToGoal() {
-    if (!session || !session.queue || session.idx >= session.queue.length) return false;
-    const room = goalRoom();
-    if (room <= 0) return false;
-    if (session.queue.length - session.idx > room) {
-      session.queue = session.queue.slice(0, session.idx + room);
-      session.total = session.queue.length;
-    }
-    return true;
-  }
-  function sessionFromPlace(data, room) {
-    if (!data || !Array.isArray(data.queueIds) || !data.queueIds.length) return null;
-    if (!(room > 0)) return null;
-    const queue = [];
-    data.queueIds.forEach((id) => {
-      if (bySlug[id] && !isRetired(id)) queue.push(id);
-    });
-    if (!queue.length) return null;
-    let idx = Number(data.index) || 0;
-    if (data.cardId) {
-      const at = queue.indexOf(data.cardId);
-      if (at >= 0) idx = at;
-    }
-    if (idx < 0) idx = 0;
-    if (idx >= queue.length) idx = queue.length - 1;
-    let nextQueue = queue;
-    if (nextQueue.length - idx > room) nextQueue = nextQueue.slice(0, idx + room);
-    if (!nextQueue.length || idx >= nextQueue.length) return null;
-    const g = data.grades || {};
-    const scope = data.deckKind === "section"
-      ? { sectionId: data.deck || null }
-      : data.deckKind === "video"
-        ? { videoSlug: data.deck || null }
-        : null;
-    return {
-      queue: nextQueue,
-      idx,
-      flipped: !!data.flipped,
-      hint: false,
-      total: nextQueue.length,
-      sectionId: data.deckKind === "section" ? (data.deck || null) : null,
-      videoSlug: data.deckKind === "video" ? (data.deck || null) : null,
-      done: Number(data.done) || 0,
-      goal: Number(data.goal) || dailyGoal(scope),
-      grades: {
-        again: Number(g.again) || 0,
-        hard: Number(g.hard) || 0,
-        good: Number(g.good) || 0,
-        easy: Number(g.easy) || 0,
-      },
-    };
-  }
-  function deckLabel(data) {
-    if (!data || !data.deck) return "All topics";
-    if (data.deckKind === "video") {
-      const v = videoOf(data.deck);
-      return v && v.title ? v.title : "Video";
-    }
-    if (data.deckKind === "section") return sectionLabel(data.deck);
-    return "All topics";
-  }
-  function continueHtml() {
-    const data = loadPlace();
-    const room = goalRoom();
-    const viable = sessionFromPlace(data, room);
-    const busy = !!(session && !sessionPaused && !studyFocusExit && session.idx < (session.queue || []).length);
-    const show = !!(viable && !busy);
-    const idx = viable ? viable.idx : (Number(data.index) || 0);
-    const total = viable ? viable.queue.length : ((data.queueIds && data.queueIds.length) || 0);
-    const where = `${deckLabel(data)} · card ${idx + 1}${total ? ` of ${total}` : ""}`;
-    return `<button type="button" id="ux-continue" class="ux-continue" ${show ? "" : "hidden"} aria-label="${esc(`Continue where I left off, ${where}`)}">
-      <span><small>${esc(where)}</small><strong>Continue where I left off</strong></span>
-      <span class="ux-continue-go" aria-hidden="true">→</span>
-    </button>`;
-  }
-  function displayCombo() {
-    const combo = pendingCombo ? pendingCombo.combo : (Number(loadPlace().combo) || 0);
-    const at = pendingCombo ? pendingCombo.comboAt : loadPlace().comboAt;
-    if (combo < 1 || !at) return 0;
-    if (localDay(at) !== localDay(Date.now())) return 0;
-    return combo;
-  }
-  function noteCombo(g) {
-    const prev = loadPlace();
-    const now = Date.now();
-    const today = localDay(now);
-    const prevCombo = pendingCombo ? pendingCombo.combo : (Number(prev.combo) || 0);
-    const prevAt = pendingCombo ? pendingCombo.comboAt : prev.comboAt;
-    const continuing = prevAt && localDay(prevAt) === today && prevCombo > 0;
-    pendingCombo = {
-      combo: g === 0 ? 0 : (continuing ? prevCombo + 1 : 1),
-      comboAt: now,
-    };
-  }
-  function resumeSessionFromPlace() {
-    const room = goalRoom();
-    const next = sessionFromPlace(loadPlace(), room);
-    if (!next) return false;
-    resumeLock += 1;
-    try {
-      session = next;
-      sessionPaused = false;
-      studyFocusExit = false;
-    } finally {
-      resumeLock -= 1;
-    }
-    enterPracticeFocus();
-    saveSession();
-    return true;
-  }
-  function explicitBootHash() {
-    const hash = bootHash || "";
-    return !!hash && hash !== "#" && hash !== "#/";
-  }
-  function applyBootPlace() {
-    const data = loadPlace();
-    if (typeof data.search === "string") libSearch = data.search;
-    if (["all", "unknown", "known", "due", "new"].includes(data.libFilter)) libFilter = data.libFilter;
-    if (!explicitBootHash() && data.tab && data.tab !== "home" && TAB_ROUTES[data.tab]) {
-      history.replaceState(history.state || { d: 0 }, "", TAB_ROUTES[data.tab]);
-    }
-    if (parseRoute().name === "study" && data.active) resumeSessionFromPlace();
-  }
-  function fullscreenNode() {
-    return document.fullscreenElement || document.webkitFullscreenElement || null;
-  }
-  function requestStudyFullscreen() {
-    const el = document.documentElement;
-    if (!el || typeof el.requestFullscreen !== "function") return;
-    if (fullscreenNode()) return;
-    try {
-      const pending = el.requestFullscreen();
-      if (pending && typeof pending.catch === "function") pending.catch(() => {});
-    } catch (e) { /* iOS Safari rejects or omits fullscreen on the document */ }
-  }
-  function exitStudyFullscreen() {
-    if (!fullscreenNode() || typeof document.exitFullscreen !== "function") return;
-    try {
-      const pending = document.exitFullscreen();
-      if (pending && typeof pending.catch === "function") pending.catch(() => {});
-    } catch (e) { /* already left */ }
-  }
-  function syncExitButton() {
-    const btn = document.getElementById("practice-focus-exit");
-    if (!btn) return;
-    btn.hidden = !practiceFocus;
-    btn.setAttribute("aria-hidden", practiceFocus ? "false" : "true");
-  }
-  function closeStudyFocus() {
-    practiceFocus = false;
-    browserFullscreen = false;
-    document.documentElement.classList.remove("practice-focus");
-    document.body.classList.remove("study-focus");
-    syncExitButton();
-    exitStudyFullscreen();
-  }
-  function resetPracticeScroll() {
-    const nodes = [document.scrollingElement, document.documentElement, document.body, root, document.getElementById("app")];
-    nodes.forEach((node) => {
-      if (!node) return;
-      node.scrollTop = 0;
-      node.scrollLeft = 0;
-    });
-    try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
-  }
-  function enterPracticeFocus() {
-    const already = practiceFocus;
-    practiceFocus = true;
-    document.documentElement.classList.add("practice-focus");
-    syncExitButton();
-    resetPracticeScroll();
-    if (!already) requestStudyFullscreen();
-    if (typeof requestAnimationFrame === "function") {
-      requestAnimationFrame(() => {
-        if (!practiceFocus) return;
-        resetPracticeScroll();
-        requestAnimationFrame(() => { if (practiceFocus) resetPracticeScroll(); });
-      });
-    }
-  }
-  function exitPracticeFocus() {
-    const was = practiceFocus || document.documentElement.classList.contains("practice-focus");
-    practiceFocus = false;
-    browserFullscreen = false;
-    document.documentElement.classList.remove("practice-focus");
-    syncExitButton();
-    if (!was) return;
-    exitStudyFullscreen();
-  }
-  function onFullscreenChange() {
-    const active = fullscreenNode();
-    if (active) {
-      browserFullscreen = true;
-      if (practiceFocus) resetPracticeScroll();
-      return;
-    }
-    if (!browserFullscreen || !practiceFocus) return;
-    browserFullscreen = false;
-    practiceFocus = false;
-    document.documentElement.classList.remove("practice-focus");
-    syncExitButton();
-  }
-  function hideUndoToast() {
-    clearTimeout(undoTimer);
-    undoTimer = null;
-    undoState = null;
-    document.querySelectorAll(".undo-toast").forEach((node) => node.remove());
-  }
-  function showKnownUndo(slug, restore) {
-    hideUndoToast();
-    const el = document.createElement("div");
-    el.className = "undo-toast";
-    el.setAttribute("role", "status");
-    el.setAttribute("aria-live", "polite");
-    const text = document.createElement("span");
-    text.textContent = "Marked Known";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = "Undo";
-    el.append(text, btn);
-    document.body.appendChild(el);
-    undoState = { slug, restore: restore || null };
-    btn.addEventListener("click", () => {
-      const state = undoState;
-      hideUndoToast();
-      if (!state) return;
-      unhideSlug(state.slug);
-      if (state.restore && session) {
-        const at = Math.max(0, Math.min(state.restore.idx, session.queue.length));
-        if (!session.queue.includes(state.slug)) session.queue.splice(at, 0, state.slug);
-        session.total = session.queue.length;
-        session.idx = Math.max(0, session.queue.indexOf(state.slug));
-        session.flipped = !!state.restore.flipped;
-        sessionPaused = false;
-        studyFocusExit = false;
-        enterPracticeFocus();
-        saveSession();
-      }
-      if (DATA) render();
-    });
-    undoTimer = setTimeout(hideUndoToast, 4500);
-  }
-  function foldSection(id, label, body) {
-    if (!body) return "";
-    return `<section class="card-fold">
-      <button type="button" class="card-fold-btn" aria-expanded="false" aria-controls="${id}">
-        <span>${esc(label)}</span><span class="card-fold-chev" aria-hidden="true">&#8250;</span>
-      </button>
-      <div class="card-fold-panel" id="${id}" hidden>${body}</div>
-    </section>`;
-  }
-  function cardFolds(c, opts) {
-    const parts = [];
-    if (opts.insight && c.x) {
-      parts.push(foldSection("fold-insight", "Insight", `<div class="x-text">${rich(c.x)}</div>`));
-    }
-    if (opts.tags && c.keywords && c.keywords.length) {
-      const chips = c.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("");
-      parts.push(foldSection("fold-tags", "Tags", `<div class="kw-row">${chips}</div>`));
-    }
-    if (opts.videos) {
-      const videos = videoRowsHtml(opts.videos === "all" ? (c.videos || []) : (c.videos || []).slice(0, 2), true);
-      if (videos) parts.push(foldSection("fold-videos", "Source videos", videos));
-    }
-    return parts.join("");
-  }
-  function bindFolds(scope) {
-    scope.querySelectorAll(".card-fold-btn").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const panel = document.getElementById(btn.getAttribute("aria-controls"));
-        const open = btn.getAttribute("aria-expanded") !== "true";
-        btn.setAttribute("aria-expanded", open ? "true" : "false");
-        if (panel) panel.hidden = !open;
-      });
-    });
-  }
-  function skipRetiredInSession() {
-    if (!session) return;
-    let changed = false;
-    while (session.idx < session.queue.length && isRetired(session.queue[session.idx])) {
-      session.queue.splice(session.idx, 1);
-      changed = true;
-    }
-    if (changed) {
-      session.total = session.queue.length;
-      saveSession();
-    }
-  }
-  function retireCurrentCard() {
-    if (!session || session.idx >= session.queue.length) return;
-    const slug = session.queue[session.idx];
-    const restore = { idx: session.idx, flipped: true };
-    retireSlug(slug);
-    const before = session.queue.slice(0, session.idx);
-    const after = session.queue.slice(session.idx + 1).filter((id) => id !== slug);
-    session.queue = before.concat(after);
-    session.total = session.queue.length;
-    session.flipped = false;
-    session.hint = false;
-    saveSession();
-    setStudyStatus("Known — card hidden");
-    showKnownUndo(slug, restore);
-    render();
-  }
-
   function startSession(opts) {
     const scope = typeof opts === "string" || !opts ? { sectionId: opts || null } : opts;
     const queue = buildQueue(scope);
     sessionPaused = false;
-    studyFocusExit = queue.length === 0;
-    if (queue.length) enterPracticeFocus();
     session = {
       queue,
       idx: 0,
@@ -1551,69 +1128,40 @@
   }
 
   function studyProgressHtml() {
-    const goal = (session && session.goal) || dailyGoal(null);
-    const reviews = todayReviews();
-    const shown = Math.max(0, Number(reviews) || 0);
-    const pct = goal ? Math.min(100, Math.round((shown / goal) * 100)) : 0;
-    const combo = displayCombo();
-    const now = Math.min(shown, goal || shown);
-    return `<div class="study-progress-wrap dx-card">
-      <div class="practice-session-row">
-        <p id="study-progress" class="study-progress">${shown}/${goal}</p>
-        <span id="practice-combo" class="practice-combo" ${combo ? "" : "hidden"}>Combo ×${combo}</span>
-      </div>
-      <div class="study-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${goal}" aria-valuenow="${now}" aria-label="Today's reviews">
-        <div id="study-progress-fill" class="study-progress-fill" style="width:${pct}%"></div>
-      </div>
-    </div>`;
+    const n = session.done + 1;
+    const pct = session.total ? Math.round((n / session.total) * 100) : 0;
+    return `<div id="study-progress">${n} / ${session.total}
+      ${completionBar(pct, `Card ${n} of ${session.total}`)}</div>`;
   }
 
-  function studyCardOpen() {
-    return !!(
-      session &&
-      !sessionPaused &&
-      !studyFocusExit &&
-      session.queue &&
-      session.idx < session.queue.length &&
-      parseRoute().name === "study" &&
-      document.getElementById("flashcard")
-    );
-  }
-
-  function revealCard() {
-    if (!session || session.flipped || sessionPaused || studyFocusExit) return false;
-    if (!session.queue || session.idx >= session.queue.length) return false;
-    session.flipped = true;
-    saveSession();
-    setStudyStatus("Answer revealed");
-    render();
-    return true;
-  }
-
-  function stepCard(delta) {
-    if (!session || session.flipped || sessionPaused || studyFocusExit) return false;
-    if (!session.queue || session.queue.length < 2) return false;
-    if (session.idx < 0 || session.idx >= session.queue.length) return false;
-    if (session.queue.length - session.idx < 2) return false;
-    if (delta > 0) session.queue.push(session.queue.splice(session.idx, 1)[0]);
-    else if (delta < 0) session.queue.splice(session.idx, 0, session.queue.pop());
-    else return false;
-    session.flipped = false;
-    saveSession();
-    setStudyStatus(delta > 0 ? "Next card" : "Previous card");
-    render();
-    return true;
+  function bindFlipCard(el) {
+    const flip = (e) => {
+      if (e.target.closest && (e.target.closest("#hint-btn") || e.target.closest("a"))) return;
+      session.flipped = true;
+      saveSession();
+      setStudyStatus("Answer revealed");
+      render();
+    };
+    el.onclick = flip;
+    el.onkeydown = (e) => {
+      if (e.target !== el) return;
+      if (e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        flip(e);
+      }
+    };
   }
 
   function renderStudy() {
-    if (!session || session.idx >= session.queue.length || studyFocusExit || sessionPaused) {
-      closeStudyFocus();
-      return renderStudyEntryOrDone();
-    }
-    skipRetiredInSession();
-    if (!session || session.idx >= session.queue.length) {
-      closeStudyFocus();
-      return renderStudyEntryOrDone();
+    if (!session || session.idx >= session.queue.length) return renderStudyEntryOrDone();
+    if (sessionPaused) {
+      sessionPaused = false;
+      window.WikiAnalytics?.record({
+        type: "session_resume",
+        sectionId: session.sectionId,
+        videoSlug: session.videoSlug,
+      });
+      saveSession();
     }
     const slug = session.queue[session.idx];
     const c = bySlug[slug];
@@ -1621,74 +1169,68 @@
       advance();
       return;
     }
-    if (practiceFocus) document.documentElement.classList.add("practice-focus");
-    else document.documentElement.classList.remove("practice-focus");
-    syncExitButton();
     const sec = sectionOf(c.section);
     setChrome(studyScopeTitle(), studyChromeMeta(session.goal), false);
-    const flipped = !!session.flipped;
-    const hardL = previewInterval(slug, 1);
-    const goodL = previewInterval(slug, 2);
-    const easyL = previewInterval(slug, 3);
-    root.innerHTML = `
-      <div id="study-session" class="study-session">
-        ${studyProgressHtml()}
-        <div id="flashcard" class="flashcard dx-card${flipped ? " is-flipped" : ""}" role="button" tabindex="0" aria-label="Flashcard — tap to flip" aria-keyshortcuts="Space Enter ArrowUp">
-          <div class="ux-swipe-label" aria-hidden="true"></div>
-          <div id="flashcard-front" class="flashcard-face flashcard-front" ${flipped ? "hidden" : ""}>
-            <div class="flashcard-hint" style="color:${sec.color}">${esc(sectionLabel(c.section))}</div>
+
+    if (!session.flipped) {
+      root.innerHTML = `
+        <div id="study-wrap">
+          ${studyProgressHtml()}
+          <button type="button" class="flashcard" id="card" aria-label="Reveal answer">
+            <div class="side-label" style="color:${sec.color}">Question &middot; ${esc(sectionLabel(c.section))}</div>
             ${emojiTag(c, "div", "card-emoji")}
             <div class="q-text">${rich(c.q)}</div>
-            <div class="flashcard-hint">Tap to reveal</div>
-          </div>
-          <div id="flashcard-back" class="flashcard-face flashcard-back" ${flipped ? "" : "hidden"}>
-            <div class="flashcard-hint">Question</div>
-            <div class="q-text q-compact">${rich(c.q)}</div>
-            <div class="flashcard-hint">Answer</div>
+            <div class="tap-hint">Tap card to reveal answer</div>
+          </button>
+          ${session.hint
+            ? `<div class="kw-row" style="margin-top:14px">${c.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>`
+            : `<button type="button" class="hint-btn" id="hint-btn">Show keywords hint</button>`}
+        </div>`;
+      root.querySelector("#card").onclick = () => {
+        session.flipped = true;
+        saveSession();
+        setStudyStatus("Answer revealed");
+        render();
+      };
+      const hb = root.querySelector("#hint-btn");
+      if (hb) hb.onclick = () => {
+        session.hint = true;
+        saveSession();
+        render();
+      };
+    } else {
+      const hardL = previewInterval(slug, 1);
+      const goodL = previewInterval(slug, 2);
+      const easyL = previewInterval(slug, 3);
+      root.innerHTML = `
+        <div id="study-wrap">
+          ${studyProgressHtml()}
+          <div class="flashcard">
+            <div class="side-label" style="color:${sec.color}">Answer</div>
+            ${emojiTag(c, "div", "card-emoji small")}
             <div class="a-text">${rich(c.a)}</div>
+            ${c.x ? `<div class="x-text"><span class="x-label">Example</span>${rich(c.x)}</div>` : ""}
             <div class="concept-name">${esc(c.title)}</div>
-            ${cardFolds(c, { insight: true, tags: true, videos: "all" })}
+            ${c.keywords.length ? `<div class="kw-row" style="margin-top:10px">${c.keywords.slice(0, 5).map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}
+            ${videoRowsHtml((c.videos || []).slice(0, 2), true)}
           </div>
-        </div>
-        <button type="button" id="btn-reveal" class="btn btn-secondary btn-block" ${flipped ? "hidden" : ""} aria-keyshortcuts="Space Enter ArrowUp">Reveal answer</button>
-        <div id="study-actions" class="study-actions" ${flipped ? "" : "hidden"}>
-          <button type="button" id="btn-again" class="btn btn-rate btn-again" aria-keyshortcuts="1 ArrowLeft" aria-label="Again, repeat now"><span class="rate-key">1 ←</span>Again</button>
-          <button type="button" id="btn-hard" class="btn btn-rate btn-hard" aria-keyshortcuts="2 ArrowDown" aria-label="Hard, ${esc(hardL)}"><span class="rate-key">2 ↓</span>Hard</button>
-          <button type="button" id="btn-good" class="btn btn-rate btn-good" aria-keyshortcuts="3 ArrowUp" aria-label="Good, ${esc(goodL)}"><span class="rate-key">3 ↑</span>Good</button>
-          <button type="button" id="btn-easy" class="btn btn-rate btn-easy" aria-keyshortcuts="4 ArrowRight" aria-label="Easy, ${esc(easyL)}"><span class="rate-key">4 →</span>Easy</button>
-          <button type="button" id="mark-known-btn" class="btn btn-rate btn-known" aria-label="Known, retire this card"><span class="rate-key">hide</span>Known</button>
-        </div>
-        <p id="ux-keys" class="ux-keys">Space or Enter reveals. Arrows move, then grade. 1–4 grade. Swipe up to reveal.</p>
-      </div>`;
-    const card = root.querySelector("#flashcard");
-    if (card) {
-      card.addEventListener("click", (e) => {
-        if (blockClick) return;
-        if (e.target.closest && e.target.closest("button, a, .card-fold, .video-row")) return;
-        if (!session.flipped) revealCard();
+          <div class="grade-row">
+            <button type="button" class="grade-btn grade-again" data-g="0" aria-label="Again, repeat now">Again<small>now</small></button>
+            <button type="button" class="grade-btn grade-hard" data-g="1" aria-label="Hard, ${hardL}">Hard<small>${hardL}</small></button>
+            <button type="button" class="grade-btn grade-good" data-g="2" aria-label="Good, ${goodL}">Good<small>${goodL}</small></button>
+            <button type="button" class="grade-btn grade-easy" data-g="3" aria-label="Easy, ${easyL}">Easy<small>${easyL}</small></button>
+          </div>
+        </div>`;
+      root.querySelectorAll(".grade-btn").forEach((b) => {
+        b.onclick = () => applySessionGrade(Number(b.dataset.g));
       });
-    }
-    const revealBtn = root.querySelector("#btn-reveal");
-    if (revealBtn) revealBtn.addEventListener("click", (e) => { e.stopPropagation(); revealCard(); });
-    [["#btn-again", 0], ["#btn-hard", 1], ["#btn-good", 2], ["#btn-easy", 3]].forEach(([sel, g]) => {
-      const btn = root.querySelector(sel);
-      if (btn) btn.addEventListener("click", () => applySessionGrade(g));
-    });
-    const knownBtn = root.querySelector("#mark-known-btn");
-    if (knownBtn) knownBtn.addEventListener("click", (e) => { e.stopPropagation(); retireCurrentCard(); });
-    bindFolds(root);
-    if (card) {
-      try { card.focus({ preventScroll: true }); }
-      catch (e) { try { card.focus(); } catch (err) { /* focus is optional */ } }
     }
   }
 
   function applySessionGrade(g) {
-    if (!session || !session.flipped || sessionPaused || studyFocusExit) return false;
-    if (session.idx >= session.queue.length) return false;
+    if (!session || !session.flipped || session.idx >= session.queue.length) return;
     const slug = session.queue[session.idx];
     const when = g === 0 ? "repeat now" : `again in ${previewInterval(slug, g)}`;
-    noteCombo(g);
     grade(slug, g);
     setStudyStatus(`${GRADE_LABELS[g]} — ${when}`);
     if (g === 0) {
@@ -1698,7 +1240,6 @@
     }
     saveSession();
     advance();
-    return true;
   }
 
   function previewInterval(slug, g) {
@@ -1745,7 +1286,6 @@
       const xpLine = progress.level != null
         ? `Level ${progress.level} · ${progress.xp || 0} XP`
         : `${progress.xp || 0} XP`;
-      placeClear = true;
       session = null;
       sessionPaused = false;
       clearStoredSession();
@@ -1772,7 +1312,7 @@
     }
     const queued = st.due + st.fresh;
     let html = `
-      <section class="learning-hero dx-card" aria-labelledby="study-title">
+      <section class="learning-hero" aria-labelledby="study-title">
         <span class="eyebrow">Study queue</span>
         <h2 id="study-title">${st.due} due · ${st.fresh} new</h2>
         <div class="status-stats">
@@ -1781,8 +1321,7 @@
           <div><strong>${st.known}</strong><span>Known</span></div>
         </div>
       </section>
-      ${continueHtml()}
-      ${startStudyBtn("study-all", queued)}
+      ${primaryStudyBtn("study-all", queued)}
       <section class="home-section" aria-labelledby="study-sections-title">
         <div class="section-heading">
           <div>
@@ -1793,9 +1332,7 @@
     for (const s of DATA.sections) html += sectionRowHtml(s, stats(s.id), "study");
     html += `</section>`;
     root.innerHTML = html;
-    const cont = root.querySelector("#ux-continue");
-    if (cont) cont.onclick = () => { if (resumeSessionFromPlace()) go("#/study"); };
-    root.querySelector("#study-all").onclick = () => startSession(null);
+    root.querySelector("#study-all").onclick = resumeOrStart;
     root.querySelectorAll(".section-row").forEach((el) => {
       el.onclick = () => startSession(el.dataset.section);
     });
@@ -1804,225 +1341,19 @@
   // ---------- boot ----------
   captureInsightsReturn();
   backBtn.onclick = goBack;
-  const studyExitBtn = document.getElementById("practice-focus-exit");
-  if (studyExitBtn) {
-    studyExitBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      exitPracticeFocus();
-    });
-  }
   tabs.forEach((b) => (b.onclick = () => {
-    if (b.dataset.tab === "study" && sessionLeft() > 0 && capSessionToGoal()) {
-      const wasPaused = sessionPaused || studyFocusExit;
-      studyFocusExit = false;
-      sessionPaused = false;
-      if (wasPaused) {
-        window.WikiAnalytics?.record({
-          type: "session_resume",
-          sectionId: session.sectionId,
-          videoSlug: session.videoSlug,
-        });
-      }
-      enterPracticeFocus();
-      saveSession();
-    }
     go(TAB_ROUTES[b.dataset.tab]);
   }));
-  function typingTarget(target) {
-    return !!(target && target.closest && target.closest("input, textarea, select, [contenteditable='true']"));
-  }
-  function onStudyKey(event) {
-    if (!event || event.defaultPrevented) return;
-    if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
-    if (event.key === "Escape") {
-      if (!practiceFocus) return;
-      event.preventDefault();
-      exitPracticeFocus();
-      return;
+  window.addEventListener("keydown", (e) => {
+    if (!session || !session.flipped) return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+    const n = Number(e.key);
+    if (n >= 1 && n <= 4) {
+      e.preventDefault();
+      applySessionGrade(n - 1);
     }
-    if (!studyCardOpen() || event.repeat || typingTarget(event.target)) return;
-    const key = event.key;
-    const up = !!(session && session.flipped);
-    const control = event.target && event.target.closest && event.target.closest("button, a");
-    let acted = false;
-    if ((key === " " || event.code === "Space" || key === "Enter") && !control) {
-      if (!up) acted = revealCard();
-      if (key === " " || event.code === "Space") acted = true;
-    } else if (key === "1" || (up && key === "ArrowLeft")) acted = up ? applySessionGrade(0) : false;
-    else if (key === "2" || (up && key === "ArrowDown")) acted = up ? applySessionGrade(1) : false;
-    else if (key === "3" || (up && key === "ArrowUp")) acted = up ? applySessionGrade(2) : false;
-    else if (key === "4" || (up && key === "ArrowRight")) acted = up ? applySessionGrade(3) : false;
-    else if (!up && key === "ArrowLeft") acted = stepCard(-1);
-    else if (!up && key === "ArrowRight") acted = stepCard(1);
-    else if (!up && key === "ArrowUp") acted = revealCard();
-    if (!acted) return;
-    event.preventDefault();
-    event.stopPropagation();
-  }
-  function scrollSnapshot() {
-    const nodes = [document.scrollingElement, root];
-    const saved = [];
-    nodes.forEach((node) => {
-      if (!node) return;
-      saved.push({ node, top: node.scrollTop, left: node.scrollLeft });
-    });
-    return saved;
-  }
-  function restoreScroll(saved) {
-    (saved || []).forEach((item) => {
-      item.node.scrollTop = item.top;
-      item.node.scrollLeft = item.left;
-    });
-  }
-  function swipeLabel(text, kind) {
-    const card = document.getElementById("flashcard");
-    if (!card) return;
-    const label = card.querySelector(".ux-swipe-label");
-    if (!label) return;
-    label.textContent = text;
-    label.className = "ux-swipe-label is-on" + (kind ? " " + kind : "");
-  }
-  function clearDrag() {
-    const card = document.getElementById("flashcard");
-    if (!card) return;
-    card.classList.remove("ux-dragging", "ux-left", "ux-right", "ux-up");
-    if (reduceMotion()) card.style.transform = "";
-    else {
-      card.style.transition = "transform 0.18s var(--ease-out, ease)";
-      card.style.transform = "";
-      setTimeout(() => { card.style.transition = ""; }, 200);
-    }
-    const label = card.querySelector(".ux-swipe-label");
-    if (label) {
-      label.className = "ux-swipe-label";
-      label.textContent = "";
-    }
-  }
-  function applyDrag(dx, dy) {
-    const card = document.getElementById("flashcard");
-    if (!card) return;
-    card.classList.add("ux-dragging");
-    card.classList.remove("ux-left", "ux-right", "ux-up");
-    const up = !!(session && session.flipped);
-    if (Math.abs(dy) > Math.abs(dx) && dy < 0) {
-      card.classList.add("ux-up");
-      swipeLabel("Reveal", "is-reveal");
-    } else if (dx < 0) {
-      card.classList.add("ux-left");
-      swipeLabel(up ? "Again" : "Previous", up ? "is-again" : "is-move");
-    } else {
-      card.classList.add("ux-right");
-      swipeLabel(up ? "Good" : "Next", up ? "is-good" : "is-move");
-    }
-    if (!reduceMotion()) {
-      const x = Math.max(-72, Math.min(72, dx));
-      const y = Math.max(-64, Math.min(24, dy));
-      card.style.transform = `translate3d(${x}px,${y}px,0)`;
-    }
-  }
-  function pressGrade(id) {
-    const wrap = document.getElementById("study-actions");
-    if (!wrap || wrap.hidden) return false;
-    const button = document.getElementById(id);
-    if (!button || button.disabled || button.hidden) return false;
-    button.click();
-    return true;
-  }
-  function finishSwipe(dx, dy) {
-    const distanceX = Math.abs(dx);
-    const distanceY = Math.abs(dy);
-    if (distanceX < 12 && distanceY < 12) return false;
-    blockClick = true;
-    const up = !!(session && session.flipped);
-    if (distanceY > distanceX && dy < -48) {
-      const revealBtn = document.getElementById("btn-reveal");
-      if (revealBtn && !revealBtn.hidden) revealBtn.click();
-      else revealCard();
-      return true;
-    }
-    if (distanceX > distanceY && distanceX > 48) {
-      if (dx < 0) {
-        if (up) pressGrade("btn-again");
-        else stepCard(-1);
-      } else if (up) pressGrade("btn-good");
-      else stepCard(1);
-      return true;
-    }
-    return true;
-  }
-  function onPointerDown(event) {
-    const card = event.target && event.target.closest && event.target.closest("#flashcard");
-    if (!card || !studyCardOpen()) return;
-    blockClick = false;
-    if (swipePointer) return;
-    if (event.pointerType === "mouse" && event.button !== 0) return;
-    if (event.target.closest && event.target.closest("button, a, input, select, textarea, .card-fold, .video-row")) return;
-    swipePointer = {
-      id: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      dx: 0,
-      dy: 0,
-      claimed: false,
-      scroll: false,
-      scrollPos: scrollSnapshot(),
-    };
-  }
-  function onPointerMove(event) {
-    if (!swipePointer || event.pointerId !== swipePointer.id) return;
-    swipePointer.dx = event.clientX - swipePointer.x;
-    swipePointer.dy = event.clientY - swipePointer.y;
-    const distanceX = Math.abs(swipePointer.dx);
-    const distanceY = Math.abs(swipePointer.dy);
-    if (!swipePointer.claimed && !swipePointer.scroll) {
-      if (distanceX < 8 && distanceY < 8) return;
-      if (distanceY > distanceX && swipePointer.dy > 0) {
-        swipePointer.scroll = true;
-        return;
-      }
-      swipePointer.claimed = true;
-      const card = document.getElementById("flashcard");
-      if (card && card.setPointerCapture) {
-        try { card.setPointerCapture(event.pointerId); }
-        catch (e) { /* already released */ }
-      }
-    }
-    if (!swipePointer.claimed || swipePointer.scroll) return;
-    restoreScroll(swipePointer.scrollPos);
-    applyDrag(swipePointer.dx, swipePointer.dy);
-  }
-  function endPointer(event, act) {
-    if (!swipePointer || event.pointerId !== swipePointer.id) return;
-    const dx = swipePointer.dx;
-    const dy = swipePointer.dy;
-    const claimed = swipePointer.claimed;
-    const saved = swipePointer.scrollPos;
-    swipePointer = null;
-    clearDrag();
-    if (!act || !claimed) return;
-    restoreScroll(saved);
-    finishSwipe(dx, dy);
-  }
-  document.addEventListener("keydown", onStudyKey, true);
-  document.addEventListener("pointerdown", onPointerDown);
-  document.addEventListener("pointermove", onPointerMove);
-  document.addEventListener("pointerup", (event) => endPointer(event, true));
-  document.addEventListener("pointercancel", (event) => endPointer(event, false));
-  document.addEventListener("touchmove", (event) => {
-    if (!swipePointer || !swipePointer.claimed) return;
-    if (event.cancelable) event.preventDefault();
-    restoreScroll(swipePointer.scrollPos);
-  }, { passive: false });
-  document.addEventListener("click", (event) => {
-    if (!blockClick) return;
-    if (!event.target.closest || !event.target.closest("#flashcard")) return;
-    event.preventDefault();
-    event.stopPropagation();
-    blockClick = false;
-  }, true);
-  document.addEventListener("fullscreenchange", onFullscreenChange);
-  document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+  });
   window.addEventListener("hashchange", () => {
     if (pendingDepth !== null) {
       history.replaceState({ d: pendingDepth }, "");
@@ -2033,7 +1364,7 @@
     }
     if (DATA) {
       render();
-      if (!practiceFocus) root.focus();
+      root.focus();
     }
   });
   if (!history.state) history.replaceState({ d: 0 }, "");
@@ -2044,13 +1375,9 @@
     });
   }
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") {
-      savePlace();
-      if (saveTimer) pushNow();
-    }
+    if (document.visibilityState === "hidden" && saveTimer) pushNow();
     if (document.visibilityState === "visible") autoLoad();
   });
-  window.addEventListener("pagehide", () => savePlace());
   showConnect();
   if (!window.GhSync) setSyncStatus("GitHub sync failed to load.");
   else setSyncStatus(hasToken() ? "Syncing…" : "Not synced");
@@ -2063,18 +1390,14 @@
     .then((data) => {
       DATA = data;
       DATA.videos = DATA.videos || {};
-      window.VideoDedupe?.collapseConceptVideos?.(DATA);
       for (const c of data.concepts) {
         if (c) c.e = conceptEmoji(c);
         bySlug[c.slug] = c;
       }
       session = hydrateSession(store.session);
       sessionPaused = !!session;
-      studyFocusExit = true;
       window.WikiAnalytics?.bootstrapGamification?.({ dueCount: stats(null).due });
       syncedSnapshot = progressSnapshot();
-      if (session && !(loadPlace().queueIds || []).length) savePlace();
-      applyBootPlace();
       render();
       if (window.GhSync) {
         setInterval(autoLoad, 60000);

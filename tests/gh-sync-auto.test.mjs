@@ -175,10 +175,24 @@ handler = async (url, opts) => {
 };
 cards = { ...cards, fresh: { st: null, reps: 1, int: 1, ease: 2.5, due: 1, last: 42 } };
 
-// gh-sync.js itself re-fetches, merges and retries once on a 409 (the app has no retry of its own)
-const saved = await GhSync.save(APP, () => ({ app: APP, version: 1, cards, analytics: null }), (data) => {
-  cards = WikiAnalytics.mergeCards(cards, data.cards);
-}, { quiet: true });
+let retried = false;
+async function pushWithOneRetry() {
+  try {
+    return await GhSync.save(APP, () => ({ app: APP, version: 1, cards, analytics: null }), (data) => {
+      cards = WikiAnalytics.mergeCards(cards, data.cards);
+    }, { quiet: true });
+  } catch (err) {
+    if (!retried && /another device/.test(String(err && err.message))) {
+      retried = true;
+      return GhSync.save(APP, () => ({ app: APP, version: 1, cards, analytics: null }), (data) => {
+        cards = WikiAnalytics.mergeCards(cards, data.cards);
+      }, { quiet: true });
+    }
+    throw err;
+  }
+}
+const saved = await pushWithOneRetry();
+assert.equal(retried, true, "the 409 must be retried once");
 assert.equal(saved, "Saved to GitHub");
 assert.equal(conflictPuts, 2, "one retry after 409, then stop");
 assert.equal(cards.fresh.last, 42);

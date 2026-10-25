@@ -270,7 +270,7 @@ handler = async (url, opts) => {
 localDoc.topics.push(topic("tp_again1", "d3", 2, "2026-10-16T13:00:00.000Z"));
 await assert.rejects(
   saveWithRetry(context.GhSync, () => localDoc, (data) => { localDoc = merge(localDoc, data); }),
-  /merge retry; not retrying/
+  /another device/
 );
 assert.equal(puts, 2, "a second 409 stops");
 assert.deepEqual(calls.map((call) => call.method), ["GET", "PUT", "GET", "PUT"]);
