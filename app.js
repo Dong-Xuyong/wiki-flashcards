@@ -23,6 +23,7 @@
   let bySlug = {};
   let session = null; // { queue, idx, flipped, hint, total, sectionId, videoSlug, done, goal, grades }
   let sessionPaused = false;
+  let studyFullscreen = false;
   let store = load();
   let pendingDepth = null; // history depth to stamp on the entry go() is creating
   let detailReveal = { slug: null, on: false };
@@ -202,9 +203,24 @@
   }
 
   // ---------- queue building ----------
+  function textField(value) {
+    if (value == null) return "";
+    return String(value).trim();
+  }
+  /**
+   * Question and answer for a concept. Deck cards use q/a. Older and agent
+   * records sometimes use question/answer, prompt/response, or front/back.
+   */
+  function reviewText(c) {
+    if (!c || typeof c !== "object") return { q: "", a: "" };
+    const q = textField(c.q) || textField(c.question) || textField(c.prompt) || textField(c.front);
+    const a = textField(c.a) || textField(c.answer) || textField(c.response) || textField(c.back);
+    return { q, a };
+  }
   /** Concepts matching a scope: whole deck, one section, or one source video. */
   function hasReviewText(c) {
-    return !!(c && String(c.q || "").trim() && String(c.a || "").trim());
+    const qa = reviewText(c);
+    return !!(qa.q && qa.a);
   }
   function poolFor(opts) {
     const { sectionId, videoSlug } = opts || {};
@@ -460,6 +476,7 @@
       if (a.dataset.suite === suiteCurrent) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
     });
+    if (r.name !== "study") setStudyFullscreen(false);
     if (r.name === "concept") return renderDetail(r.slug);
     if (r.name === "video") return renderVideo(r.slug);
     if (r.name === "library") return renderLibrary();
@@ -1003,6 +1020,7 @@
     }
     const revealed = detailReveal.on;
     const known = isKnown(slug);
+    const qa = reviewText(c);
     const emoji = emojiTag(c, "span", "detail-emoji");
     root.innerHTML = `
       <div class="detail-title">${emoji}${esc(c.title)}
@@ -1010,8 +1028,8 @@
       </div>
       ${c.keywords.length ? `<div class="kw-row">${c.keywords.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}
       <div class="panel qa-block">
-        <div class="q">Q: ${rich(c.q)}</div>
-        ${revealed ? `<div class="a">A: ${rich(c.a)}</div>${c.x ? `<div class="x">Example: ${rich(c.x)}</div>` : ""}`
+        <div class="q">Q: ${rich(qa.q)}</div>
+        ${revealed ? `<div class="a">A: ${rich(qa.a)}</div>${c.x ? `<div class="x">Example: ${rich(c.x)}</div>` : ""}`
           : `<button type="button" class="reveal-answer" id="reveal-answer">Reveal answer</button>`}
       </div>
       ${c.definition ? `<div class="detail-def">${esc(c.definition)}</div>` : ""}
@@ -1152,6 +1170,50 @@
     };
   }
 
+  function setStudyFullscreen(on) {
+    studyFullscreen = !!on;
+    document.documentElement.classList.toggle("study-fullscreen", studyFullscreen);
+  }
+
+  function studyFullscreenBtn() {
+    const on = studyFullscreen;
+    const label = on ? "Exit full screen" : "Full screen";
+    return `<button type="button" class="icon-btn study-fullscreen-btn" id="fullscreen-btn" aria-pressed="${on ? "true" : "false"}" aria-label="${label}">${label}</button>`;
+  }
+
+  function bindStudyFullscreen() {
+    setStudyFullscreen(studyFullscreen);
+    const btn = root.querySelector("#fullscreen-btn");
+    if (!btn) return;
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      setStudyFullscreen(!studyFullscreen);
+      render();
+    };
+  }
+
+  function markSessionKnown() {
+    if (!session || session.idx >= session.queue.length) return;
+    const slug = session.queue[session.idx];
+    markKnown(slug);
+    setStudyStatus("Marked as known");
+    let extra = 0;
+    for (let i = session.queue.length - 1; i > session.idx; i--) {
+      if (session.queue[i] === slug) {
+        session.queue.splice(i, 1);
+        extra += 1;
+      }
+    }
+    session.queue.splice(session.idx, 1);
+    session.total = Math.max(session.done + 1, session.total - extra);
+    session.flipped = false;
+    session.hint = false;
+    session.done += 1;
+    saveSession();
+    render();
+  }
+
   function renderStudy() {
     if (!session || session.idx >= session.queue.length) return renderStudyEntryOrDone();
     if (sessionPaused) {
@@ -1170,16 +1232,18 @@
       return;
     }
     const sec = sectionOf(c.section);
+    const qa = reviewText(c);
     setChrome(studyScopeTitle(), studyChromeMeta(session.goal), false);
 
     if (!session.flipped) {
       root.innerHTML = `
         <div id="study-wrap">
+          <div class="study-tools">${studyFullscreenBtn()}</div>
           ${studyProgressHtml()}
           <button type="button" class="flashcard" id="card" aria-label="Reveal answer">
             <div class="side-label" style="color:${sec.color}">Question &middot; ${esc(sectionLabel(c.section))}</div>
             ${emojiTag(c, "div", "card-emoji")}
-            <div class="q-text">${rich(c.q)}</div>
+            <div class="q-text">${rich(qa.q)}</div>
             <div class="tap-hint">Tap card to reveal answer</div>
           </button>
           ${session.hint
@@ -1198,17 +1262,19 @@
         saveSession();
         render();
       };
+      bindStudyFullscreen();
     } else {
       const hardL = previewInterval(slug, 1);
       const goodL = previewInterval(slug, 2);
       const easyL = previewInterval(slug, 3);
       root.innerHTML = `
         <div id="study-wrap">
+          <div class="study-tools">${studyFullscreenBtn()}</div>
           ${studyProgressHtml()}
           <div class="flashcard">
             <div class="side-label" style="color:${sec.color}">Answer</div>
             ${emojiTag(c, "div", "card-emoji small")}
-            <div class="a-text">${rich(c.a)}</div>
+            <div class="a-text">${rich(qa.a)}</div>
             ${c.x ? `<div class="x-text"><span class="x-label">Example</span>${rich(c.x)}</div>` : ""}
             <div class="concept-name">${esc(c.title)}</div>
             ${c.keywords.length ? `<div class="kw-row" style="margin-top:10px">${c.keywords.slice(0, 5).map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}
@@ -1219,11 +1285,15 @@
             <button type="button" class="grade-btn grade-hard" data-g="1" aria-label="Hard, ${hardL}">Hard<small>${hardL}</small></button>
             <button type="button" class="grade-btn grade-good" data-g="2" aria-label="Good, ${goodL}">Good<small>${goodL}</small></button>
             <button type="button" class="grade-btn grade-easy" data-g="3" aria-label="Easy, ${easyL}">Easy<small>${easyL}</small></button>
+            <button type="button" class="known-btn mark-known" id="mark-known-btn" aria-label="Mark as known">Mark as known</button>
           </div>
         </div>`;
       root.querySelectorAll(".grade-btn").forEach((b) => {
         b.onclick = () => applySessionGrade(Number(b.dataset.g));
       });
+      const knownBtn = root.querySelector("#mark-known-btn");
+      if (knownBtn) knownBtn.onclick = () => markSessionKnown();
+      bindStudyFullscreen();
     }
   }
 
@@ -1262,6 +1332,7 @@
   }
 
   function renderStudyEntryOrDone() {
+    setStudyFullscreen(false);
     const finished = session && session.idx >= session.queue.length && session.total > 0;
     const st = stats(null);
     const goal = (session && session.goal) || dailyGoal(null);
@@ -1345,6 +1416,12 @@
     go(TAB_ROUTES[b.dataset.tab]);
   }));
   window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && studyFullscreen) {
+      e.preventDefault();
+      setStudyFullscreen(false);
+      if (DATA) render();
+      return;
+    }
     if (!session || !session.flipped) return;
     const t = e.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
@@ -1391,7 +1468,11 @@
       DATA = data;
       DATA.videos = DATA.videos || {};
       for (const c of data.concepts) {
-        if (c) c.e = conceptEmoji(c);
+        if (!c) continue;
+        c.e = conceptEmoji(c);
+        const qa = reviewText(c);
+        if (!textField(c.q) && qa.q) c.q = qa.q;
+        if (!textField(c.a) && qa.a) c.a = qa.a;
         bySlug[c.slug] = c;
       }
       session = hydrateSession(store.session);

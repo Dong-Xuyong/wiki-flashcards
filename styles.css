@@ -1325,6 +1325,20 @@ mark.hl {
 
 /* ---------- Study ---------- */
 #study-wrap { display: flex; flex-direction: column; height: 100%; }
+.study-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.study-fullscreen-btn.icon-btn {
+  width: auto;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 12px;
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
 #study-progress {
   font-size: 0.78rem;
   color: var(--text-dim);
@@ -1447,7 +1461,8 @@ mark.hl {
   color: var(--accent);
 }
 
-.grade-row { display: flex; gap: 8px; margin-top: 12px; }
+.grade-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.grade-row .known-btn { flex: 1 1 100%; }
 .grade-btn {
   flex: 1;
   border: none;
@@ -1493,6 +1508,51 @@ mark.hl {
   color: var(--green);
   border-color: rgba(74, 222, 128, 0.5);
   background: var(--green-soft);
+}
+
+html.study-fullscreen,
+html.study-fullscreen body {
+  overflow: hidden;
+}
+html.study-fullscreen #app {
+  max-width: none;
+  height: 100dvh;
+  max-height: 100dvh;
+}
+html.study-fullscreen #topbar,
+html.study-fullscreen .suite-nav,
+html.study-fullscreen #tabbar,
+html.study-fullscreen #connect {
+  display: none !important;
+}
+html.study-fullscreen #view-root {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding:
+    max(8px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+}
+html.study-fullscreen #study-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+html.study-fullscreen .flashcard {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+html.study-fullscreen .study-tools {
+  min-height: 44px;
+}
+html.study-fullscreen .study-fullscreen-btn {
+  position: fixed;
+  z-index: 60;
+  top: env(safe-area-inset-top, 0px);
+  right: env(safe-area-inset-right, 0px);
+  margin: 8px;
 }
 
 .done-panel { text-align: center; padding: 44px 16px; }
