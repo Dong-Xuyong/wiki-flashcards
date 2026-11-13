@@ -21,7 +21,7 @@
   const BILI_HOVER_RESET_KEY = "wiki-insights-bili-hover-reset-v2";
   const BILI_PROXY =
     "https://wiki-insights-bilibili-proxy.dong-xuyong.workers.dev/video";
-  // Catalog and insight packs stay in the wiki-insights Pages repo.
+  // Catalog, insight packs, and optional infographics stay in the wiki-insights Pages repo.
   const DATA_BASE = "/wiki-insights/data/";
   // Cards is the parent Study app on every host, including localhost.
   const FLASHCARDS_URL = "../";
@@ -47,6 +47,8 @@
   let biliVideoId = null;
   let biliSaveTimer = null;
   let agentEntries = [];
+  let infographicPushed = false;
+  let infographicIndexPromise = null;
   const AGENT_APP_ID = "wiki-insights-agent";
   const AGENT_KINDS = new Set(["ingested", "insight", "skipped", "note"]);
   const AGENT_ID_RE = /^[a-z0-9_-]+$/;
@@ -2230,14 +2232,254 @@
     });
   }
 
+  function detailHash(slug, { infographic = false } = {}) {
+    const params = new URLSearchParams();
+    if (infographic) params.set("infographic", "1");
+    const query = params.toString();
+    return `#/v/${encodeURIComponent(slug)}${query ? `?${query}` : ""}`;
+  }
+
+  function infographicRoute(url) {
+    let hash = "";
+    try {
+      hash = new URL(url, location.origin).hash;
+    } catch {
+      return null;
+    }
+    const [path, query = ""] = hash.replace(/^#/, "").split("?");
+    const match = path.match(/^\/v\/([^/?#]+)/);
+    if (!match) return null;
+    return {
+      slug: decodeURIComponent(match[1]),
+      open: new URLSearchParams(query).get("infographic") === "1",
+    };
+  }
+
+  function hashHasInfographic() {
+    return infographicRoute(location.href)?.open === true;
+  }
+
+  /**
+   * index.json may be an array of video ids (or {video_id|id} objects),
+   * a map whose keys are video ids, or an object with video_ids/ids/videos/items.
+   * Returns null when the payload is not a manifest.
+   */
+  function infographicIdsFromIndex(data) {
+    const ids = new Set();
+    const add = (value) => {
+      if (typeof value === "string") {
+        const id = value.trim();
+        if (id) ids.add(id);
+        return;
+      }
+      if (!value || typeof value !== "object") return;
+      const id = value.video_id || value.videoId || value.id;
+      if (typeof id === "string" && id.trim()) ids.add(id.trim());
+    };
+    const addMap = (map) => {
+      for (const [key, value] of Object.entries(map)) {
+        if (typeof value === "string") add(value);
+        if (value) add(key);
+      }
+    };
+    if (Array.isArray(data)) {
+      data.forEach(add);
+      return ids;
+    }
+    if (!data || typeof data !== "object") return null;
+    const listKeys = ["video_ids", "ids", "videos", "items", "infographics"];
+    if (listKeys.some((key) => Object.prototype.hasOwnProperty.call(data, key))) {
+      for (const key of listKeys) {
+        if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
+        const value = data[key];
+        if (Array.isArray(value)) value.forEach(add);
+        else if (value && typeof value === "object") addMap(value);
+      }
+      return ids;
+    }
+    addMap(data);
+    return ids;
+  }
+
+  function loadInfographicIndex() {
+    if (!infographicIndexPromise) {
+      infographicIndexPromise = fetch(`${DATA_BASE}infographics/index.json?v=${ASSET_VERSION}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => (data == null ? null : infographicIdsFromIndex(data)))
+        .catch(() => null);
+    }
+    return infographicIndexPromise;
+  }
+
+  function infographicSrc(videoId) {
+    return `${DATA_BASE}infographics/${encodeURIComponent(videoId)}.webp?v=${ASSET_VERSION}`;
+  }
+
+  function discardInfographicOverlay() {
+    infographicPushed = false;
+    document.getElementById("app")?.removeAttribute("inert");
+    document.documentElement.classList.remove("infographic-open");
+    document.body.querySelector(":scope > #infographic-lightbox")?.remove();
+  }
+
+  function stripInfographicHash(video) {
+    if (!video || !hashHasInfographic() || currentVideo?.slug !== video.slug) return;
+    history.replaceState(
+      history.state,
+      "",
+      `${location.pathname}${location.search}${detailHash(video.slug)}`
+    );
+  }
+
+  function rememberInfographicHistory() {
+    const slug = currentVideo?.slug;
+    if (!slug || infographicPushed) return;
+    const flagged = `${location.pathname}${location.search}${detailHash(slug, { infographic: true })}`;
+    const plain = `${location.pathname}${location.search}${detailHash(slug)}`;
+    if (history.state?.infographic === 1 && hashHasInfographic()) {
+      infographicPushed = true;
+      return;
+    }
+    if (!hashHasInfographic()) {
+      history.pushState({ infographic: 1 }, "", flagged);
+      infographicPushed = true;
+      return;
+    }
+    history.replaceState({ infographic: 0 }, "", plain);
+    history.pushState({ infographic: 1 }, "", flagged);
+    infographicPushed = true;
+  }
+
+  function openInfographic({ fromHistory = false } = {}) {
+    const box = document.getElementById("infographic-lightbox");
+    const img = document.getElementById("infographic-img");
+    const full = document.getElementById("infographic-lightbox-img");
+    if (!box || !img?.getAttribute("src") || !full) return;
+    full.alt = img.alt;
+    if (full.getAttribute("src") !== img.getAttribute("src")) full.src = img.src;
+    if (box.parentElement !== document.body) document.body.appendChild(box);
+    box.classList.remove("hidden");
+    document.documentElement.classList.add("infographic-open");
+    document.getElementById("app")?.setAttribute("inert", "");
+    box.querySelector(".infographic-close")?.focus({ preventScroll: true });
+    if (fromHistory) infographicPushed = true;
+    else rememberInfographicHistory();
+  }
+
+  function closeInfographic({ fromHistory = false } = {}) {
+    const box = document.getElementById("infographic-lightbox");
+    const wasOpen = !!(box && !box.classList.contains("hidden"));
+    if (box) box.classList.add("hidden");
+    document.documentElement.classList.remove("infographic-open");
+    document.getElementById("app")?.removeAttribute("inert");
+    if (wasOpen) document.getElementById("infographic-open")?.focus({ preventScroll: true });
+    if (fromHistory) {
+      infographicPushed = false;
+      return;
+    }
+    if (infographicPushed) {
+      infographicPushed = false;
+      history.back();
+      return;
+    }
+    if (currentVideo && hashHasInfographic()) stripInfographicHash(currentVideo);
+  }
+
+  function syncInfographicFromHash(event) {
+    const prev = infographicRoute(event.oldURL);
+    const next = infographicRoute(event.newURL);
+    if (!prev || !next || prev.slug !== next.slug || prev.open === next.open) return false;
+    if (currentVideo?.slug !== next.slug || !document.getElementById("infographic-open")) return false;
+    if (next.open) {
+      const img = document.getElementById("infographic-img");
+      if (!img?.getAttribute("src")) return false;
+      openInfographic({ fromHistory: true });
+    } else {
+      closeInfographic({ fromHistory: true });
+    }
+    return true;
+  }
+
+  function infographicBlockHtml(video) {
+    const alt = esc(video.title);
+    return `
+      <section id="infographic-block" class="infographic-block hidden" aria-labelledby="infographic-heading">
+        <h2 id="infographic-heading" class="section-title">Infographic</h2>
+        <button type="button" class="infographic-open" id="infographic-open">
+          <img id="infographic-img" alt="${alt}" width="1920" height="1080" loading="lazy" decoding="async" />
+          <span class="infographic-hint" aria-hidden="true">Tap to enlarge</span>
+        </button>
+      </section>
+      <div id="infographic-lightbox" class="infographic-lightbox hidden" role="dialog" aria-modal="true" aria-labelledby="infographic-heading">
+        <button type="button" class="infographic-close" aria-label="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+        <img id="infographic-lightbox-img" alt="${alt}" />
+      </div>`;
+  }
+
+  async function mountInfographic(video) {
+    const block = document.getElementById("infographic-block");
+    const img = document.getElementById("infographic-img");
+    if (!block || !img || !video?.video_id) return;
+    const index = await loadInfographicIndex();
+    if (!block.isConnected || currentVideo?.slug !== video.slug) return;
+    if (index && !index.has(video.video_id)) {
+      stripInfographicHash(video);
+      return;
+    }
+    const src = infographicSrc(video.video_id);
+    const probe = new Image();
+    probe.onload = () => {
+      if (!block.isConnected || currentVideo?.slug !== video.slug || !img.isConnected) return;
+      img.alt = video.title || "";
+      const full = document.getElementById("infographic-lightbox-img");
+      if (full) full.alt = video.title || "";
+      img.addEventListener(
+        "error",
+        () => {
+          block.classList.add("hidden");
+          stripInfographicHash(video);
+        },
+        { once: true }
+      );
+      img.src = src;
+      block.classList.remove("hidden");
+      if (hashHasInfographic()) openInfographic();
+    };
+    probe.onerror = () => {
+      if (!block.isConnected || currentVideo?.slug !== video.slug) return;
+      block.classList.add("hidden");
+      stripInfographicHash(video);
+    };
+    probe.src = src;
+  }
+
+  function bindInfographic(video) {
+    const openBtn = document.getElementById("infographic-open");
+    const box = document.getElementById("infographic-lightbox");
+    if (!openBtn || !box) return;
+    openBtn.addEventListener("click", () => openInfographic());
+    box.querySelector(".infographic-close")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeInfographic();
+    });
+    box.addEventListener("click", (event) => {
+      if (event.target === box) closeInfographic();
+    });
+    mountInfographic(video);
+  }
+
   async function renderDetail(slug) {
     const v = allVideos().find((x) => x.slug === slug);
     if (!v) {
       destroyPlayer();
+      discardInfographicOverlay();
       root.innerHTML = `<div class="empty">Video not found.</div>`;
       return;
     }
     destroyPlayer();
+    discardInfographicOverlay();
     setChrome({ title: "", showBack: true, showTabs: true, showNav: false });
     currentVideo = v;
     panel = "insights";
@@ -2272,9 +2514,11 @@
       }</h1>
       <div id="detail-labels" class="detail-labels"></div>
       ${keywordChips(v.keywords, 8)}
+      ${v.video_id ? infographicBlockHtml(v) : ""}
       <div id="detail-body" role="tabpanel" tabindex="0"><div class="empty">Loading…</div></div>
     `;
     paintDetailLabels();
+    if (v.video_id) bindInfographic(v);
     root.querySelectorAll(".kw-chip").forEach((chip) => {
       chip.addEventListener("click", () => {
         navigate(
@@ -2526,6 +2770,7 @@
   }
 
   async function route({ focusView = false } = {}) {
+    discardInfographicOverlay();
     if (!CATALOG) return;
     const pending = queryUrlParam();
     if (pending && !location.hash.includes("/v/")) {
@@ -2543,7 +2788,13 @@
     else if (r.name === "browse") renderBrowse(r);
     else if (r.name === "progress") renderProgress();
     else renderHome(r);
-    if (focusView) requestAnimationFrame(() => root.focus({ preventScroll: true }));
+    if (focusView) {
+      requestAnimationFrame(() => {
+        if (!document.documentElement.classList.contains("infographic-open")) {
+          root.focus({ preventScroll: true });
+        }
+      });
+    }
   }
 
   backBtn.addEventListener("click", returnFromDetail);
@@ -2614,8 +2865,21 @@
     }
   });
 
-  window.addEventListener("hashchange", () => {
+  window.addEventListener("hashchange", (event) => {
+    if (syncInfographicFromHash(event)) return;
     route({ focusView: true });
+  });
+  window.addEventListener("popstate", () => {
+    const box = document.getElementById("infographic-lightbox");
+    if (!box || box.classList.contains("hidden") || hashHasInfographic()) return;
+    closeInfographic({ fromHistory: true });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const box = document.getElementById("infographic-lightbox");
+    if (!box || box.classList.contains("hidden")) return;
+    event.preventDefault();
+    closeInfographic();
   });
   window.addEventListener("pagehide", () => {
     persistPlayerTime();
