@@ -75,4 +75,5 @@ node tests/learning-model.js
 node tests/gh-sync-auto.test.mjs
 node tests/agent-feed.test.mjs
 node tests/aws-study.test.mjs
+node tests/infographic-index.test.mjs
 ```
